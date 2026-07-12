@@ -212,6 +212,79 @@ export class SupraGod {
 }
 
 // ---------------------------------------------------------------------------
+// BACKEND B2 — InstructGod (SmolLM2-360M-Instruct, in-browser, WebGPU→WASM)
+//
+// A ~360M instruct model — 7x Supra-50M and, unlike it, one that actually READS
+// the world digest. It runs even without WebGPU (verified in WASM), where the
+// 0.5B class OOMs. One generation yields BOTH the choice and the omen:
+//   "deity:verb | omen"
+// The choice is validated against legalBids (off-menu → anger-weighted lawful
+// pick, so still capricious-but-lawful); the prose becomes the prophecy. Its
+// weak format-adherence is a feature: the confabulation IS the voice.
+// ---------------------------------------------------------------------------
+export class InstructGod {
+  constructor(modelId = 'HuggingFaceTB/SmolLM2-360M-Instruct', opts = {}) {
+    this.modelId = modelId;
+    this.name = 'SmolLM2-360M';
+    this.ready = false;
+    this.dtype = opts.dtype || 'q4f16';
+    this.device = opts.device || 'webgpu';
+    this.temperature = opts.temperature ?? 0.9;
+    this.fallback = new HeuristicGod(7);
+  }
+
+  async load(onProgress) {
+    const { AutoTokenizer, AutoModelForCausalLM } = await import(
+      'https://esm.sh/@huggingface/transformers@3.7.5'
+    );
+    this.tok = await AutoTokenizer.from_pretrained(this.modelId);
+    this.model = await AutoModelForCausalLM.from_pretrained(this.modelId, {
+      dtype: this.dtype, device: this.device, progress_callback: onProgress,
+    });
+    this.ready = true;
+  }
+
+  async decide(w, legal) {
+    if (!this.ready) return this.fallback.decide(w, legal);
+    try {
+      const menu = [...new Set(legal.map((b) => `${b.deity}:${b.verb}`))];
+      const sys = 'You are the capricious pantheon of four gods — Vurm (water, drought), Kel (war), '
+        + 'Oss (mercy), Ithra (judgement) — acting upon a small failing valley. From the MENU pick '
+        + 'exactly one act, then utter a single short cryptic omen. Answer EXACTLY as: deity:verb | omen';
+      const usr = `The valley now:\n${digest(w)}\nMENU: ${menu.join(', ')}\nYour act:`;
+      const prompt = this.tok.apply_chat_template([
+        { role: 'system', content: sys },
+        { role: 'user', content: 'The valley now: the well is fouled, tension high.\nMENU: kel:raid, oss:mend\nYour act:' },
+        { role: 'assistant', content: 'kel:raid | Smoke stains the dawn; the ridge has found its appetite.' },
+        { role: 'user', content: usr },
+      ], { add_generation_prompt: true, tokenize: false });
+      const ids = this.tok(prompt);
+      const out = await this.model.generate({
+        ...ids, max_new_tokens: 42, do_sample: true,
+        temperature: this.temperature, top_p: 0.9, repetition_penalty: 1.1,
+      });
+      const tail = this.tok.batch_decode(out, { skip_special_tokens: true })[0].slice(prompt.length).trim();
+      const m = tail.match(/([a-z]+)\s*:\s*([a-z_]+)\s*[|\-–—:]*\s*(.*)/i);
+      let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
+      let src = chosen ? 'smol' : 'prior';
+      if (!chosen) {                                    // off-menu → anger-weighted legal pick (still lawful)
+        const rank = ranking(w).filter((r) => legal.some((b) => b.deity === r.deity));
+        const pk = (Math.random() < 0.75 ? rank[0] : (rank[1] || rank[0]));
+        const opts = legal.filter((b) => b.deity === pk.deity);
+        chosen = opts[Math.floor(Math.random() * opts.length)];
+      }
+      let omen = (m && m[3]) ? m[3] : tail.replace(/^[a-z]+\s*:\s*[a-z_]+\s*[|\-–—:]*/i, '');
+      omen = (omen || '').split('\n')[0].replace(/["]/g, '').trim();
+      if (omen.length < 8) omen = pick(OMENS[chosen.verb], Math.random);
+      return { deity: chosen.deity, verb: chosen.verb, target: null, reason: src, omen: omen.slice(0, 150) };
+    } catch (e) {
+      console.warn('InstructGod failed, falling back:', e);
+      return this.fallback.decide(w, legal);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // BACKEND C — LiveLLMGod (ConicCat/Qwen3.5-0.8B-Text-Only, via game/god_server.py)
 //
 // Runs a real 0.8B LLM AS the god, live. It is world-blind (measured), but the

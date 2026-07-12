@@ -23,7 +23,7 @@
 <script type="module">
 import * as THREE from 'https://esm.sh/three@0.160.0';
 import { newWorld, applyPlayerAction, upkeepTick, divineStrike, PANTHEON, DEITY_IDS, ranking } from './engine.js';
-import { HeuristicGod, SupraGod } from './gods.js';
+import { HeuristicGod, InstructGod } from './gods.js';
 
 // ---- engine state (REAL-TIME: no turns; time flows, gods act on their own cadence) ----
 let w = newWorld(), god = new HeuristicGod((Date.now() & 0xffff) || 1);
@@ -298,10 +298,10 @@ async function awakenModel(){
   const devs = navigator.gpu ? ['webgpu','wasm'] : ['wasm'];   // don't burn time probing absent WebGPU
   for(const dev of devs){
     try{
-      const s = new SupraGod('Luigi/supra-god-onnx', { dtype:'q4', device:dev });
+      const s = new InstructGod('HuggingFaceTB/SmolLM2-360M-Instruct', { dtype:'q4f16', device:dev });
       await s.load(p=>{ if(p && p.status==='progress') godPct=Math.round(p.progress||0); });
       god=s; godBackend='supra'; godLoading=false;
-      toast='The god now thinks — and speaks — for itself.'; toastT=4.5; return;   // its omens are now model-written
+      toast='The god now reads the vale, and speaks its own omens.'; toastT=4.5; return;
     }catch(e){ console.warn('awaken('+dev+') failed:', e); }
   }
   godLoading=false; godBackend='heuristic';
@@ -583,7 +583,7 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
      <p class="mono text-[11px] uppercase tracking-[0.3em] text-amber-400 mt-6 mb-3">whom do you revere?&nbsp;&nbsp;[1–4]</p>
      <div class="flex flex-wrap gap-3 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="call:${d}" class="pointer-events-auto text-left w-52 p-3 rounded-lg border hover:bg-stone-900" style="border-color:${GODC[d]}66"><div class="mono text-xs mb-1" style="color:${GODC[d]}"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[CALLINGS[d].power].name}</span></div><div class="serif italic text-[12px] text-stone-400 leading-snug">${CALLINGS[d].blurb}</div></button>`).join('')}</div>
      <p class="mono text-[9px] text-stone-600 mt-6">left-click move · SPACE strike · SHIFT roll · Q/R/F/V powers · E act · K chronicle</p>
-     <button data-act="mind" class="pointer-events-auto mono text-[10px] mt-4 px-3 py-1.5 rounded border ${godBackend==='supra'?'border-violet-700 text-violet-300':'border-stone-700 text-stone-500 hover:text-stone-300'}">${godLoading?`◍ waking the mind… ${godPct}%`:(godBackend==='supra'?'◈ the divine mind is awake':'◇ awaken the divine mind — let a real 50M LLM be the god (experimental, in-browser)')}</button>
+     <button data-act="mind" class="pointer-events-auto mono text-[10px] mt-4 px-3 py-1.5 rounded border ${godBackend==='supra'?'border-violet-700 text-violet-300':'border-stone-700 text-stone-500 hover:text-stone-300'}">${godLoading?`◍ waking the mind… ${godPct}%`:(godBackend==='supra'?'◈ the divine mind is awake (SmolLM2-360M)':'◇ awaken the divine mind — a real 360M LLM becomes the god (~270MB, in-browser, WebGPU)')}</button>
    </div></div>`:''}
    ${covenantOpen&&!w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">The Covenant</p><p class="serif text-3xl text-stone-100 mt-3 mb-1">You have proven devotion. Pledge.</p><p class="serif italic text-stone-500 mb-5">Your patron grants their power — and their rival rises to test your oath.</p><div class="flex flex-wrap gap-2 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="cov:${i}" class="pointer-events-auto mono text-xs px-4 py-2.5 rounded border text-stone-200 hover:bg-stone-800" style="border-color:${GODC[d]}88"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[COV_POWER[d]].name} · devotion ${piety[d].toFixed(1)}</span></button>`).join('')}</div></div></div>`:''}
    ${showChron&&started?`<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="chron"><div class="max-w-lg w-full border border-stone-800 rounded-lg bg-stone-950 p-5 max-h-[80vh] overflow-auto" data-act="stop"><div class="flex justify-between items-baseline mb-3"><h2 class="serif text-2xl text-stone-100">Chronicle of the Vale</h2><span class="mono text-[10px] text-stone-500">day ${day}</span></div>${chronicle.length?chronicle.map(r=>`<div class="border-b border-stone-900 py-1.5"><span class="mono text-[9px] uppercase" style="color:${GODC[r.god]}">${GNAME(r.god)} · ${r.verb}</span>${r.crisis?`<span class="mono text-[8px] ml-2 ${r.done?'text-emerald-400':'text-rose-400'}">${r.done?'answered':'unanswered'}</span>`:''}<div class="serif italic text-[12px] text-stone-300">“${r.omen||'—'}”</div></div>`).join(''):'<p class="serif italic text-stone-500">The gods have not yet moved.</p>'}<button data-act="chron" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (K)</button></div></div>`:''}
