@@ -457,12 +457,15 @@ function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
   // real-time flow: time passes and the gods act on their own — no turns taken (paused until you choose a calling)
-  if(started && !w.over){
+  if(started && !w.over && !covenantOpen){                             // covenant modal freezes the world, like the calling screen
     dayT += dt;
     if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ endGame(false, 'fall'); } }
     divPool += dt * (0.5 + w.tension * 0.02);
     if(divPool >= 8 && !divBusy){ divPool = 0; divBusy = true;
-      divineStrike(w, god).then(act => { if(act){ omen = {text:act.omen, turn:act.turn}; pending = {idx:w.ledger.length-1, actual:act.deity}; AUDIO.sfx.omen(); onGodAct(act); } divBusy = false; }); }
+      divineStrike(w, god)
+        .then(act => { if(act){ omen = {text:act.omen, turn:act.turn}; pending = {idx:w.ledger.length-1, actual:act.deity}; AUDIO.sfx.omen(); onGodAct(act); } })
+        .catch(e => console.warn('divineStrike failed:', e))
+        .finally(() => { divBusy = false; }); }   // ALWAYS release — else a single throw silences the gods forever
   }
   // move (world-relative)
   if(dodgeCd>0) dodgeCd-=dt;
@@ -482,7 +485,7 @@ function animate(){
       if(d>1.3){ hero.position.x+=ddx/d*26*dt; hero.position.z+=ddz/d*26*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
-  if(started && !w.over) updateCombat(dt);
+  if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
   if(started && !w.over) storyTick();                                 // advance the emergent campaign
   if(bannerT>0) bannerT-=dt;                                          // title card fades
   AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
