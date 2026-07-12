@@ -115,16 +115,20 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.Shad
 })); scene.add(sky);
 
 // ---- encounters: a real-time skirmish IN the 3D world (explore → combat) ----
-let encounter = null, heroFlash = 0;
+let encounter = null, heroFlash = 0, heroHp = 100; const heroMax = 100;
+const powCd = { mend: 0, flood: 0 };
+function castMend(){ if(!encounter||powCd.mend>0) return; powCd.mend=13; encounter.integrity=Math.min(100,encounter.integrity+30); heroHp=Math.min(heroMax,heroHp+40); fx3('#34d399'); }
+function castFlood(){ if(!encounter||powCd.flood>0) return; powCd.flood=11; for(const r of encounter.raiders) r.slow=4; fx3('#f59e0b'); }
+let fxT=0, fxC='#fff'; function fx3(c){ fxT=0.35; fxC=c; }
 const raiderMat = () => new THREE.MeshStandardMaterial({ color:0xfb7185, emissive:0x3a0d0d });
 function makeRaider(x,z){ const m=new THREE.Group();
   const b=new THREE.Mesh(new THREE.CapsuleGeometry(0.9,1.8,3,6), raiderMat()); b.position.y=1.7; m.add(b);
   const h=new THREE.Mesh(new THREE.SphereGeometry(0.7,8,8), raiderMat()); h.position.y=3.4; m.add(h);
-  m.position.set(x,0,z); scene.add(m); return { mesh:m, hp:30, cool:0 }; }
+  m.position.set(x,0,z); scene.add(m); return { mesh:m, hp:30, cool:0, slow:0, dying:0 }; }
 function startEncounter(){
   const n = 3 + Math.floor(w.bandits.strength*0.8), rp=SITES.ridge.pos, raiders=[];
   for(let i=0;i<n;i++) raiders.push(makeRaider(rp[0]-8+i*4+Math.random()*4, rp[2]+6+Math.random()*6));
-  encounter = { raiders, integrity:100 };
+  encounter = { raiders, integrity:100 }; heroHp = heroMax; powCd.mend = 0; powCd.flood = 0;
   omen = { text:'Smoke on the ridge — they come down. Defend the vale! (walk in, press SPACE to strike)', turn:w.turn }; pending=null; shrineMenu=false;
 }
 function endEncounter(win){
@@ -134,15 +138,24 @@ function endEncounter(win){
   encounter=null;
 }
 function heroStrike(){ if(!encounter) return; let best=null,bd=1e9;
-  for(const r of encounter.raiders){ if(r.hp<=0)continue; const d=hero.position.distanceTo(r.mesh.position); if(d<7&&d<bd){bd=d;best=r;} }
-  if(best){ best.hp-=18; heroFlash=0.16; } }
-function updateEncounter(dt){ const e=encounter, vc=SITES.village.pos;
-  for(const r of e.raiders){ if(r.hp<=0){ if(r.mesh.parent) scene.remove(r.mesh); continue; }
-    const dir=new THREE.Vector3(vc[0]-r.mesh.position.x,0,vc[2]-r.mesh.position.z), d=dir.length();
-    if(d>6){ dir.normalize(); r.mesh.position.addScaledVector(dir,11*dt); r.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
-    else { r.cool-=dt; if(r.cool<=0){ e.integrity-=6; r.cool=1; } } }
-  e.raiders=e.raiders.filter(r=>r.hp>0);
-  if(!e.raiders.length) endEncounter(true); else if(e.integrity<=0) endEncounter(false);
+  for(const r of encounter.raiders){ if(r.hp<=0||r.dying)continue; const d=hero.position.distanceTo(r.mesh.position); if(d<8&&d<bd){bd=d;best=r;} }
+  if(best){ best.hp-=20; best.hitFlash=0.15; heroFlash=0.16;
+    const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.2);
+    if(best.hp<=0) best.dying=0.4; } }
+function updateEncounter(dt){ const e=encounter, vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
+  powCd.mend=Math.max(0,powCd.mend-dt); powCd.flood=Math.max(0,powCd.flood-dt);
+  for(const r of e.raiders){
+    if(r.dying){ r.dying-=dt; r.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(r.dying<=0&&r.mesh.parent) scene.remove(r.mesh); continue; }
+    r.mesh.children.forEach(c=>c.material.emissive.setHex(r.hitFlash>0?0xffffff:0x3a0d0d)); if(r.hitFlash>0) r.hitFlash-=dt;
+    if(r.slow>0) r.slow-=dt;
+    const dh=hero.position.distanceTo(r.mesh.position), tgt = dh<9 ? hero.position : vc;
+    const dir=new THREE.Vector3(tgt.x-r.mesh.position.x,0,tgt.z-r.mesh.position.z), d=dir.length();
+    if(d>4){ dir.normalize(); r.mesh.position.addScaledVector(dir,(r.slow>0?4:11)*dt); r.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
+    else { r.cool-=dt; if(r.cool<=0){ r.cool=1; if(tgt===hero.position){ heroHp-=8; heroFlash=0.16; } else e.integrity-=6; } }
+  }
+  e.raiders=e.raiders.filter(r=>r.hp>0 || r.dying>0);
+  const alive=e.raiders.filter(r=>r.hp>0).length;
+  if(alive===0) endEncounter(true); else if(e.integrity<=0 || heroHp<=0) endEncounter(false);
 }
 
 // ---- input ----
@@ -151,6 +164,7 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase();
   if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){keys.add(k);e.preventDefault();}
   if(k==='e') interact();
   if(k===' '){ heroStrike(); e.preventDefault(); }
+  if(k==='q') castMend(); if(k==='f') castFlood();
   if(['1','2','3','4'].includes(k)){ if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
   if(k==='r'&&w.over) restart();
 });
@@ -178,7 +192,8 @@ function animate(){
     if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
     if(dx||dz){ const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
-  if(encounter) updateEncounter(dt);
+  if(encounter) updateEncounter(dt); else if(heroHp<heroMax) heroHp=Math.min(heroMax,heroHp+8*dt);
+  if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
   // camera follows (behind + above)
   // third-person follow: trail behind the hero's facing
@@ -230,7 +245,11 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
      </div>
      <div class="flex gap-3 pointer-events-auto"><a href="./explore.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a><a href="./index.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">board ▸</a></div>
    </div>
-   ${encounter?`<div class="absolute top-16 left-1/2 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-rose-950/85 border border-rose-800 text-rose-200">⚔ raiders ${encounter.raiders.length} · vale integrity ${Math.max(0,encounter.integrity)|0}% · SPACE to strike</span></div>`:''}
+   ${fxT>0?`<div class="absolute inset-0" style="background:${fxC};opacity:${(fxT*0.4).toFixed(2)}"></div>`:''}
+   ${encounter?`<div class="absolute top-16 left-1/2 -translate-x-1/2 text-center">
+       <div class="mono text-xs px-3 py-1.5 rounded-full bg-rose-950/85 border border-rose-800 text-rose-200 inline-block">⚔ raiders ${encounter.raiders.filter(r=>r.hp>0).length} · vale ${Math.max(0,encounter.integrity)|0}% · health ${Math.max(0,heroHp)|0}</div>
+       <div class="mono text-[10px] text-stone-400 mt-1">SPACE strike · <b class="text-emerald-300">Q</b> Mend${powCd.mend>0?` (${powCd.mend.toFixed(0)}s)`:''} · <b class="text-amber-300">F</b> Flood${powCd.flood>0?` (${powCd.flood.toFixed(0)}s)`:''}</div>
+     </div>`:''}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
    ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
    ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">WASD / arrows to walk · approach a place and press E</div>`:''}
