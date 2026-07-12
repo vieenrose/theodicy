@@ -74,11 +74,11 @@ function OmenPic({ verb, className }) {
     class=${'object-cover rounded ' + (className || '')} alt="omen" loading="lazy" />`;
 }
 
-function theodicyRank(f) {
-  if (f >= 0.85) return 'You knew their hands as your own. A true theodicy.';
-  if (f >= 0.6)  return 'You caught the shape of them, more often than not.';
-  if (f >= 0.35) return 'You saw them in glimpses, and guessed the rest.';
-  return 'You suffered them without ever knowing them.';
+function theodicyRank(lang, f) {
+  if (f >= 0.85) return t(lang,'r1');
+  if (f >= 0.6)  return t(lang,'r2');
+  if (f >= 0.35) return t(lang,'r3');
+  return t(lang,'r4');
 }
 
 function Stat({ label, value, max = 20, danger, proj }) {
@@ -233,16 +233,16 @@ function App() {
             <div class="flex-1">
             <p class="serif italic text-stone-100 text-lg leading-snug max-w-2xl">“${w.omens.at(-1).text}”</p>
             <div class="flex items-center gap-2.5 mt-2 flex-wrap">
-              <span class="mono text-[9px] uppercase tracking-widest text-stone-500">sign · turn ${w.omens.at(-1).turn}</span>
+              <span class="mono text-[9px] uppercase tracking-widest text-stone-500">${T('signTag',{t:w.omens.at(-1).turn})}</span>
               ${pending ? html`
-                <span class="mono text-[9px] uppercase tracking-widest text-amber-300/80">· whose hand?</span>
+                <span class="mono text-[9px] uppercase tracking-widest text-amber-300/80">${' '}${T('whose')}</span>
                 ${DEITY_IDS.map((d) => html`
                   <button key=${d} onClick=${() => accuse(pendingIdx, d)} title=${'accuse ' + PANTHEON[d].name}
                     class="hover:scale-110 transition-transform"><${Face} deity=${d} size=${30} /></button>`)}
               ` : lastRead ? html`
                 <${Face} deity=${lastRead.actual} size=${26} />
                 <span class=${'mono text-[9px] uppercase tracking-widest ' + (lastRead.correct ? 'text-emerald-400' : 'text-rose-400')}>
-                  ${lastRead.correct ? '✓ you knew the hand' : '✗ you named ' + PANTHEON[lastRead.guess].name.split(',')[0]} — it was ${PANTHEON[lastRead.actual].name.split(',')[0]}
+                  ${lastRead.correct ? T('knew') : T('named',{g:gName(lastRead.guess)})} ${lastRead.correct ? '' : T('itWas',{g:gName(lastRead.actual)})}
                 </span>` : ''}
             </div>
             </div>
@@ -255,55 +255,55 @@ function App() {
         <!-- ============ THE VALLEY ============ -->
         <section class="col-span-3 space-y-4">
           <div class="border border-stone-800 rounded-lg p-4 bg-stone-950/60">
-            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">The Valley</h2>
+            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">${T('hValley')}</h2>
             <div class="space-y-3">
-              <${Stat} label="Souls"   value=${v.pop}     max=${20} danger=${v.pop <= 4} />
-              <${Stat} label="Food"    value=${v.food}    max=${20} danger=${v.food <= 2} proj=${projFood} />
-              <${Stat} label="Water"   value=${v.water}   max=${15} danger=${v.water <= 2} proj=${projWater} />
-              <${Stat} label="Morale"  value=${v.morale}  max=${100} danger=${v.morale <= 25} />
-              <${Stat} label="Defense" value=${v.defense} max=${10} />
+              <${Stat} label=${T('souls')}   value=${v.pop}     max=${20} danger=${v.pop <= 4} />
+              <${Stat} label=${T('food')}    value=${v.food}    max=${20} danger=${v.food <= 2} proj=${projFood} />
+              <${Stat} label=${T('water')}   value=${v.water}   max=${15} danger=${v.water <= 2} proj=${projWater} />
+              <${Stat} label=${T('morale')}  value=${v.morale}  max=${100} danger=${v.morale <= 25} />
+              <${Stat} label=${T('defense')} value=${v.defense} max=${10} />
             </div>
             ${!w.over && (thirsting || starving) && html`
               <p class="mt-3 mono text-[9px] leading-relaxed text-rose-400">
-                ${thirsting ? 'water runs out next turn — Tend the Well. ' : ''}${starving ? 'not enough to eat next turn — Harvest.' : ''}
+                ${thirsting ? T('warnWater') : ''}${starving ? T('warnFood') : ''}
               </p>`}
-            <p class="mt-2 mono text-[9px] text-stone-600">each turn: −${upkeepFood} food, −1 water (upkeep)</p>
+            <p class="mt-2 mono text-[9px] text-stone-600">${T('upkeep',{f:upkeepFood})}</p>
             <div class="mt-4 pt-3 border-t border-stone-800 space-y-2 mono text-[11px]">
-              <div class="flex justify-between"><span class="text-stone-600">tension</span>
+              <div class="flex justify-between"><span class="text-stone-600">${T('tension')}</span>
                 <span class=${w.tension > 65 ? 'text-rose-400' : 'text-stone-400'}>${w.tension}</span></div>
-              <div class="flex justify-between"><span class="text-stone-600">bandits</span>
+              <div class="flex justify-between"><span class="text-stone-600">${T('bandits')}</span>
                 <span class="text-stone-400">${w.bandits.strength}</span></div>
-              <div class="flex justify-between"><span class="text-stone-600">well</span>
-                <span class=${w.sites.well.clean ? 'text-stone-400' : 'text-amber-400'}>${w.sites.well.clean ? 'tended' : 'fouled'}</span></div>
-              <div class="flex justify-between"><span class="text-stone-600">shrine</span>
-                <span class=${w.sites.shrine.desecrated ? 'text-rose-400' : 'text-stone-400'}>${w.sites.shrine.desecrated ? 'broken' : 'standing'}</span></div>
-              <div class="flex justify-between"><span class="text-stone-600">debts</span>
+              <div class="flex justify-between"><span class="text-stone-600">${T('well')}</span>
+                <span class=${w.sites.well.clean ? 'text-stone-400' : 'text-amber-400'}>${w.sites.well.clean ? T('tended') : T('fouled')}</span></div>
+              <div class="flex justify-between"><span class="text-stone-600">${T('shrine')}</span>
+                <span class=${w.sites.shrine.desecrated ? 'text-rose-400' : 'text-stone-400'}>${w.sites.shrine.desecrated ? T('broken') : T('standing')}</span></div>
+              <div class="flex justify-between"><span class="text-stone-600">${T('debts')}</span>
                 <span class=${w.debts.length ? 'text-violet-400' : 'text-stone-400'}>${w.debts.length}</span></div>
             </div>
           </div>
 
           <!-- model backend -->
           <div class="border border-stone-800 rounded-lg p-4 bg-stone-950/60">
-            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">The Mind Behind</h2>
+            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">${T('hMind')}</h2>
             ${backend === 'heuristic' ? html`
               <input class="w-full mono text-[10px] bg-stone-900 border border-stone-800 rounded px-2 py-1.5 mb-2 text-stone-400"
                      value=${modelId} onChange=${(e) => setModelId(e.target.value)} />
               <button onClick=${enableSupra} disabled=${!!loading}
                 class="w-full mono text-[11px] px-3 py-2 rounded border border-violet-900 bg-violet-950/40 text-violet-300 hover:bg-violet-900/40 disabled:opacity-40 mb-1.5">
-                ${loading ? `loading ${loading.pct}%` : 'summon Supra-50M ▸ (webgpu)'}
+                ${loading ? `loading ${loading.pct}%` : T('summonSupra')}
               </button>
               <button onClick=${enableLive} disabled=${!!loading}
                 class="w-full mono text-[11px] px-3 py-2 rounded border border-sky-900 bg-sky-950/40 text-sky-300 hover:bg-sky-900/40 disabled:opacity-40">
-                summon Qwen3.5-0.8B ▸ (local)
+                ${T('summonLive')}
               </button>
               ${loading && html`<p class=${'mt-2 mono text-[9px] leading-relaxed ' + (loading.err ? 'text-rose-400' : 'text-stone-600')}>${loading.msg}</p>`}
               <p class="mt-2 serif italic text-[11px] text-stone-600 leading-snug">
-                Heuristic god is playing — competent, boring, always here. Summon a model for something stranger.
+                ${T('mindHeur')}
               </p>
             ` : backend === 'supra' ? html`
               <p class="mono text-[11px] text-violet-300">Supra-50M · q4 · webgpu</p>
               <p class="mt-2 serif italic text-[11px] text-stone-600 leading-snug">
-                It scores the legal menu and samples. It cannot act illegally. It can only be strange.
+                ${T('supraDesc')}
               </p>
             ` : html`
               <p class="mono text-[11px] text-sky-300">Qwen3.5-0.8B · live · localhost:8008</p>
@@ -319,10 +319,10 @@ function App() {
         <section class="col-span-6">
           <div class="border border-stone-800 rounded-lg bg-stone-950/60 h-[520px] flex flex-col">
             <div class="px-5 py-3 border-b border-stone-800 flex justify-between items-center">
-              <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500">Signs & Events</h2>
+              <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500">${T('hSigns')}</h2>
               <button onClick=${() => setShowLedger(!showLedger)}
                 class="mono text-[9px] uppercase tracking-widest text-stone-600 hover:text-stone-300">
-                ${showLedger ? '× hide the ledger' : 'read the ledger ▸'}
+                ${showLedger ? T('hideLedger') : T('readLedger')}
               </button>
             </div>
 
@@ -337,12 +337,12 @@ function App() {
                 <div key=${'o' + i} class="flex gap-3 border-l-2 border-stone-700 pl-4 py-1">
                   ${f.verb && html`<${OmenPic} verb=${f.verb} className="w-24 h-16 shrink-0 mt-1 opacity-90 ring-1 ring-stone-800" />`}
                   <div>
-                    <div class="mono text-[9px] text-stone-600 uppercase tracking-widest">omen · turn ${f.turn}</div>
-                    <p class="serif text-lg text-stone-200 italic leading-snug mt-0.5">${f.text}</p>
+                    <div class="mono text-[9px] text-stone-600 uppercase tracking-widest">${T('omenTag',{t:f.turn})}</div>
+                    <p class="serif text-lg text-stone-200 italic leading-snug mt-0.5">${omenText(f)}</p>
                   </div>
                 </div>
               ` : html`
-                <p key=${'l' + i} class="serif text-sm text-stone-500 leading-snug">${f.text}</p>
+                <p key=${'l' + i} class="serif text-sm text-stone-500 leading-snug">${locLine(f.text)}</p>
               `)}
 
               ${thinking && html`<p class="mono text-[10px] text-violet-500 animate-pulse">…something is deciding…</p>`}
@@ -350,22 +350,22 @@ function App() {
               ${w.over && html`
                 <div class=${'mt-4 p-4 rounded border ' + (w.won ? 'border-emerald-900 bg-emerald-950/30' : 'border-rose-900 bg-rose-950/30')}>
                   <p class=${'serif text-2xl ' + (w.won ? 'text-emerald-300' : 'text-rose-300')}>
-                    ${w.won ? 'The valley endures.' : 'The valley is empty.'}
+                    ${w.won ? T('endures') : T('empty')}
                   </p>
                   <p class="serif italic text-sm text-stone-400 mt-1">
-                    ${w.won ? 'It held for thirty turns.' : 'The last soul is gone.'}
+                    ${w.won ? T('held') : T('lastSoul')}
                   </p>
                   <div class="mt-3 pt-3 border-t border-stone-800/60">
-                    <p class="mono text-[9px] uppercase tracking-widest text-stone-500">theodicy score — how well you read the gods</p>
+                    <p class="mono text-[9px] uppercase tracking-widest text-stone-500">${T('scoreHead')}</p>
                     ${reads.length ? html`
-                      <p class="serif text-xl text-amber-200 mt-1">${correctReads} / ${reads.length} hands read
+                      <p class="serif text-xl text-amber-200 mt-1">${T('hands',{c:correctReads,n:reads.length})}
                         <span class="text-stone-500 text-sm">(${Math.round(100 * correctReads / reads.length)}%)</span></p>
-                      <p class="serif italic text-sm text-stone-400 mt-0.5">${theodicyRank(correctReads / reads.length)}</p>
-                    ` : html`<p class="serif italic text-sm text-stone-500 mt-1">You never once named a hand. The gods stayed strangers.</p>`}
+                      <p class="serif italic text-sm text-stone-400 mt-0.5">${theodicyRank(lang, correctReads / reads.length)}</p>
+                    ` : html`<p class="serif italic text-sm text-stone-500 mt-1">${T('never')}</p>`}
                   </div>
                   <button onClick=${restart}
                     class="mt-3 mono text-[11px] px-3 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">
-                    begin again ▸
+                    ${T('again')}
                   </button>
                 </div>`}
             </div>
@@ -374,13 +374,13 @@ function App() {
             ${showLedger && html`
               <div class="border-t border-stone-800 max-h-52 overflow-y-auto px-5 py-3 bg-black/40">
                 <p class="mono text-[9px] uppercase tracking-widest text-stone-600 mb-2">
-                  the divine ledger — append-only · what actually happened
+                  ${T('ledgerTitle')}
                 </p>
-                ${!w.ledger.length && html`<p class="serif italic text-stone-700 text-xs">Nothing written yet.</p>`}
+                ${!w.ledger.length && html`<p class="serif italic text-stone-700 text-xs">${T('ledgerEmpty')}</p>`}
                 ${w.ledger.slice().reverse().map((e, i) => html`
                   <div key=${i} class="mono text-[10px] py-1 flex gap-2 border-b border-stone-900">
                     <span class="text-stone-700 w-8">t${e.turn}</span>
-                    <span class=${'w-32 ' + TONE[PANTHEON[e.deity].color]}>${PANTHEON[e.deity].name.split(',')[0]}</span>
+                    <span class=${'w-32 ' + TONE[PANTHEON[e.deity].color]}>${gName(e.deity)}</span>
                     <span class="text-stone-400 w-16">${e.verb}</span>
                     <span class="text-stone-600 flex-1">${e.reason}</span>
                   </div>`)}
@@ -391,7 +391,7 @@ function App() {
         <!-- ============ ACTIONS + PANTHEON ============ -->
         <section class="col-span-3 space-y-4">
           <div class="border border-stone-800 rounded-lg p-4 bg-stone-950/60">
-            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">This Turn</h2>
+            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">${T('hTurn')}</h2>
             <div class="space-y-1.5">
               ${Object.entries(PLAYER_ACTIONS).map(([k, a]) => html`
                 <button key=${k} onClick=${() => act(k)} disabled=${w.over || thinking}
@@ -399,20 +399,20 @@ function App() {
                     (k === 'desecrate'
                       ? 'border-rose-950 bg-rose-950/20 hover:bg-rose-900/30'
                       : 'border-stone-800 bg-stone-900/40 hover:bg-stone-800/60')}>
-                  <div class=${'serif text-sm ' + (k === 'desecrate' ? 'text-rose-300' : 'text-stone-200')}>${a.label}</div>
-                  <div class="mono text-[9px] text-stone-600 mt-0.5">${a.hint}</div>
+                  <div class=${'serif text-sm ' + (k === 'desecrate' ? 'text-rose-300' : 'text-stone-200')}>${aLabel(k)}</div>
+                  <div class="mono text-[9px] text-stone-600 mt-0.5">${aHint(k)}</div>
                   ${AFFINITY[k] && html`<div class="flex gap-1.5 mt-1">
                     ${Object.entries(AFFINITY[k]).map(([d, s]) => html`
-                      <span key=${d} class=${'mono text-[8px] ' + (s > 0 ? 'text-emerald-400' : 'text-rose-400')}>${s > 0 ? '+' : '−'}${PANTHEON[d].name.split(',')[0]}</span>`)}
+                      <span key=${d} class=${'mono text-[8px] ' + (s > 0 ? 'text-emerald-400' : 'text-rose-400')}>${s > 0 ? '+' : '−'}${gName(d)}</span>`)}
                   </div>`}
                 </button>`)}
             </div>
           </div>
 
           <div class="border border-stone-800 rounded-lg p-4 bg-stone-950/60">
-            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-1">Make an Offering</h2>
+            <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-1">${T('hOffer')}</h2>
             <p class="serif italic text-[11px] text-stone-600 mb-3 leading-snug">
-              One rises. The other three are slighted.
+              ${T('offerSub')}
             </p>
             <div class="grid grid-cols-2 gap-1.5">
               ${DEITY_IDS.map((d) => html`
@@ -420,19 +420,19 @@ function App() {
                   class=${'px-2 py-2 rounded border text-left disabled:opacity-30 hover:brightness-125 flex items-center gap-2 ' + BG[PANTHEON[d].color]}>
                   <${Face} deity=${d} size=${34} />
                   <div class="min-w-0">
-                    <div class=${'serif text-xs truncate ' + TONE[PANTHEON[d].color]}>${PANTHEON[d].name.split(',')[0]}</div>
-                    <div class="mono text-[8px] text-stone-500 mt-0.5">favor ${w.favor[d]}</div>
+                    <div class=${'serif text-xs truncate ' + TONE[PANTHEON[d].color]}>${gName(d)}</div>
+                    <div class="mono text-[8px] text-stone-500 mt-0.5">${T('favor')} ${w.favor[d]}</div>
                   </div>
                 </button>`)}
             </div>
             ${w.over && html`
               <div class="mt-4 pt-3 border-t border-stone-800">
-                <p class="mono text-[9px] uppercase tracking-widest text-stone-600 mb-2">their regard for you, revealed</p>
+                <p class="mono text-[9px] uppercase tracking-widest text-stone-600 mb-2">${T('regard')}</p>
                 ${rank.map((r) => html`
                   <div key=${r.deity} class="flex items-center gap-2 mono text-[10px] py-1">
                     <${Face} deity=${r.deity} size=${24} />
-                    <span class=${'flex-1 ' + TONE[PANTHEON[r.deity].color]}>${PANTHEON[r.deity].name.split(',')[0]}</span>
-                    <span class="text-stone-500">favor ${w.favor[r.deity]} · wrath ${r.anger.toFixed(0)}</span>
+                    <span class=${'flex-1 ' + TONE[PANTHEON[r.deity].color]}>${gName(r.deity)}</span>
+                    <span class="text-stone-500">${T('favor')} ${w.favor[r.deity]} · ${T('wrath')} ${r.anger.toFixed(0)}</span>
                   </div>`)}
               </div>`}
           </div>
