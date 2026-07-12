@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THEODICY · the vale — walk it</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=JetBrains+Mono&display=swap');
+  body{background:#0c0a09;overflow:hidden}
+  .serif{font-family:'EB Garamond',Georgia,serif}.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  canvas{display:block}
+</style>
+</head>
+<body class="text-stone-300">
+<!--
+  explore.html — the god-sim as a WALKABLE overworld, not a menu board.
+  Move your steward (WASD / arrows / click) around the vale; step onto a place to
+  act there. Each act ends the turn and a god answers with an omen — read it and
+  name the hand. Same engine.js truth, same four gods, now on your feet.
+-->
+<div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
+<canvas id="c"></canvas>
+<script type="module">
+import { newWorld, stepTurn, PANTHEON, DEITY_IDS, ranking, VERBS } from './engine.js';
+import { HeuristicGod } from './gods.js';
+
+const cv = document.getElementById('c'), g = cv.getContext('2d'), ui = document.getElementById('ui');
+function resize(){ cv.width = innerWidth; cv.height = innerHeight; } addEventListener('resize', resize); resize();
+const WW = 1000, WH = 640;                       // world coords; we letterbox-scale to the screen
+function view(){ const s = Math.min(cv.width/WW, cv.height/WH); return { s, ox:(cv.width-WW*s)/2, oy:(cv.height-WH*s)/2 }; }
+function toWorld(px,py){ const v=view(); return { x:(px-v.ox)/v.s, y:(py-v.oy)/v.s }; }
+
+let w = newWorld(), god = new HeuristicGod((Date.now()&0xffff)||1);
+let hero = { x: 500, y: 340 }, moveTarget = null, busy = false;
+let omen = null, pending = null, reads = [], flash = null, msg = 'Use WASD / arrows to walk. Step onto a place and press E.';
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// the walkable places — each maps to an engine action
+const PLACES = [
+  { id:'well',    x:250, y:250, r:52, color:'#f0a63a', name:'The Thirsting Well', act:()=>({action:'tend_well'}), label:'draw & tend the water' },
+  { id:'fields',  x:430, y:455, r:56, color:'#7a8b3a', name:'The Fields',          act:()=>({action:'harvest'}),   label:'harvest' },
+  { id:'village', x:520, y:330, r:60, color:'#d6c48a', name:'Aldermere',           act:()=>({action:'rest'}),      label:'rest the village' },
+  { id:'wall',    x:660, y:250, r:46, color:'#9a8358', name:'The Palisade',        act:()=>({action:'fortify'}),   label:'fortify' },
+  { id:'ridge',   x:640, y:120, r:54, color:'#fb7185', name:'The Grudge Ridge',    act:()=>({action:'harvest'}),   label:'watch the treeline', watch:true },
+  { id:'shrine',  x:770, y:445, r:56, color:'#a78bfa', name:'The Ledger Shrine',   shrine:true, name2:'offer, settle, or desecrate' },
+];
+
+// ---------- input ----------
+const keys = new Set();
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d'].includes(k)) { keys.add(k); e.preventDefault(); }
+  if (k === 'e') interact();
+  if (['1','2','3','4'].includes(k) && shrineMenu) chooseOffer(+k-1);
+  if (pending && ['1','2','3','4'].includes(k) && !shrineMenu) accuse(+k-1);
+  if (k === 'r' && w.over) restart();
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+cv.addEventListener('pointerdown', e => { moveTarget = toWorld(e.clientX, e.clientY); });
+
+let shrineMenu = false;
+function nearestPlace(){ let best=null,bd=1e9; for(const p of PLACES){ const d=Math.hypot(hero.x-p.x,hero.y-p.y); if(d<p.r && d<bd){bd=d;best=p;} } return best; }
+
+async function interact(){
+  if (busy || w.over) return;
+  const p = nearestPlace(); if (!p) return;
+  if (p.shrine){ shrineMenu = true; return; }
+  await doTurn(p.act());
+}
+async function chooseOffer(i){
+  shrineMenu = false;
+  // shrine options: 0-3 offer to a god, else handled elsewhere
+  await doTurn({ action:'offer', deity: DEITY_IDS[i] });
+}
+async function doTurn(a){
+  busy = true; shrineMenu = false;
+  const before = w.ledger.length;
+  await stepTurn(w, a.action, a.deity, god);
+  if (w.ledger.length > before){
+    const e = w.ledger.at(-1);
+    omen = { text: e.omen, verb: e.verb, turn: e.turn };
+    pending = { idx: w.ledger.length - 1, actual: e.deity };
+    flash = { t: 1 };
+  } else { omen = null; pending = null; }
+  busy = false;
+}
+function accuse(i){
+  if (!pending) return;
+  const guess = DEITY_IDS[i];
+  reads.push({ correct: guess === pending.actual, guess, actual: pending.actual });
+  pending = { ...pending, result: { guess, correct: guess === pending.actual } };
+  setTimeout(()=>{ if(pending&&pending.result) pending=null; }, 2200);
+}
+function restart(){ w = newWorld(); reads = []; omen = null; pending = null; }
+window.restart = restart;
+
+// ---------- loop ----------
+let last = 0;
+function frame(ts){
+  const dt = Math.min(0.05, (ts-last)/1000 || 0); last = ts;
+  step(dt); render(); requestAnimationFrame(frame);
+}
+function step(dt){
+  if (flash) flash.t -= dt*1.4;
+  if (busy || w.over) return;
+  let dx=0, dy=0;
+  if (keys.has('arrowup')||keys.has('w')) dy--; if (keys.has('arrowdown')||keys.has('s')) dy++;
+  if (keys.has('arrowleft')||keys.has('a')) dx--; if (keys.has('arrowright')||keys.has('d')) dx++;
+  if (dx||dy){ moveTarget=null; const m=Math.hypot(dx,dy); hero.x+=dx/m*185*dt; hero.y+=dy/m*185*dt; }
+  else if (moveTarget){ const ddx=moveTarget.x-hero.x, ddy=moveTarget.y-hero.y, d=Math.hypot(ddx,ddy); if(d>3){ hero.x+=ddx/d*185*dt; hero.y+=ddy/d*185*dt; } else moveTarget=null; }
+  hero.x=clamp(hero.x,20,WW-20); hero.y=clamp(hero.y,70,WH-20);
+}
+
+// ---------- render ----------
+const IMG = {}; for (const d of DEITY_IDS){ const im=new Image(); im.src='./avatars/'+d+'.png'; IMG[d]=im; }
+function render(){
+  const v = view();
+  g.fillStyle='#0c0a09'; g.fillRect(0,0,cv.width,cv.height);
+  g.save(); g.translate(v.ox,v.oy); g.scale(v.s,v.s);
+  // ground
+  const grd=g.createRadialGradient(WW/2,WH/2,80,WW/2,WH/2,700); grd.addColorStop(0,'#17231a'); grd.addColorStop(1,'#0c0a09');
+  g.fillStyle=grd; g.fillRect(0,0,WW,WH);
+  // ridge
+  g.fillStyle='#1a120c'; g.beginPath(); g.moveTo(0,150); for(let x=0;x<=WW;x+=120) g.lineTo(x, 70+40*Math.sin(x)); g.lineTo(WW,0); g.lineTo(0,0); g.closePath(); g.fill();
+  // river
+  g.strokeStyle=w.sites.well.clean?'#2b5a80':'#4b5320'; g.lineWidth=16; g.lineCap='round'; g.beginPath(); g.moveTo(120,180); g.bezierCurveTo(300,240,300,320,430,320); g.bezierCurveTo(600,320,600,500,760,540); g.stroke();
+  // tension ember haze
+  const t=w.tension/100; if(t>0.15){ g.fillStyle=`rgba(${120+t*80|0},20,20,${0.06+0.28*t})`; g.fillRect(0,0,WW,WH); }
+  // places
+  const near = nearestPlace();
+  for (const p of PLACES) drawPlace(p, p===near);
+  // hero
+  drawHero();
+  g.restore();
+  drawUI();
+}
+function drawPlace(p, active){
+  g.save(); g.translate(p.x,p.y);
+  g.globalAlpha = active?1:0.9;
+  if (active){ g.fillStyle=p.color+'22'; g.beginPath(); g.arc(0,0,p.r,0,7); g.fill(); }
+  // landmark
+  if (p.id==='well'){ g.fillStyle='#1c1917'; g.beginPath(); g.arc(0,0,17,0,7); g.fill(); g.fillStyle=w.sites.well.clean?'#3b82c4':'#84812f'; g.beginPath(); g.arc(0,0,11,0,7); g.fill(); }
+  else if (p.id==='fields'){ g.fillStyle= w.village.food>8?'#3f6b2a':'#6b5a2a'; for(let i=0;i<4;i++)g.fillRect(-38+i*20,-18,15,36); }
+  else if (p.id==='village'){ for(let i=0;i<5;i++){const a=i/5*6.28; g.fillStyle='#2a2320'; g.fillRect(Math.cos(a)*26-9,Math.sin(a)*20-9,18,15); g.fillStyle='#3a2c22'; g.beginPath(); g.moveTo(Math.cos(a)*26-12,Math.sin(a)*20-6); g.lineTo(Math.cos(a)*26,Math.sin(a)*20-16); g.lineTo(Math.cos(a)*26+12,Math.sin(a)*20-6); g.fill();} }
+  else if (p.id==='wall'){ g.strokeStyle='#5b4636'; g.lineWidth=4; for(let i=0;i<7;i++){g.beginPath(); g.moveTo(-24+i*8,10); g.lineTo(-24+i*8,-12); g.stroke();} }
+  else if (p.id==='ridge'){ for(let i=0;i<w.bandits.strength;i++){ g.fillStyle='#f97316'; g.beginPath(); g.ellipse(-40+i*18,0,3,7,0,0,7); g.fill(); } }
+  else if (p.id==='shrine'){ if(w.sites.shrine.desecrated){ g.strokeStyle='#57534e'; g.lineWidth=4; g.beginPath(); g.moveTo(-10,10); g.lineTo(-4,-8); g.stroke(); } else { g.fillStyle='#2a2536'; g.fillRect(-8,-22,16,30); g.fillStyle='#a78bfa'; g.beginPath(); g.arc(0,-26,3,0,7); g.fill(); } }
+  // ring + label
+  g.strokeStyle=p.color; g.lineWidth=active?2.5:1.2; g.globalAlpha=active?0.9:0.4; g.beginPath(); g.arc(0,0,p.r,0,7); g.stroke();
+  g.globalAlpha=1; g.textAlign='center'; g.fillStyle='#e7e5e4'; g.font='italic 15px EB Garamond, serif'; g.fillText(p.name, 0, p.r+18);
+  g.restore();
+}
+function drawHero(){
+  g.save(); g.translate(hero.x,hero.y);
+  g.fillStyle='#000'; g.globalAlpha=0.35; g.beginPath(); g.ellipse(0,12,11,4,0,0,7); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#c9b892'; g.beginPath(); g.moveTo(0,-16); g.quadraticCurveTo(11,-6,9,14); g.lineTo(-9,14); g.quadraticCurveTo(-11,-6,0,-16); g.fill(); // cloak
+  g.fillStyle='#e7dcc4'; g.beginPath(); g.arc(0,-15,6,0,7); g.fill();  // head
+  g.strokeStyle='#0c0a09'; g.lineWidth=1; g.stroke();
+  g.restore();
+}
+
+// ---------- HUD (DOM) ----------
+function drawUI(){
+  const v=w.village, near=nearestPlace(), correct=reads.filter(r=>r.correct).length;
+  const stat=(l,val,d)=>`<span class="${d?'text-rose-400':'text-stone-300'}">${l} ${val}</span>`;
+  ui.innerHTML = `
+   <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
+     <div class="flex gap-5 items-baseline">
+       <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· walk the vale</span></span>
+       <span class="mono text-xs">turn <span class="text-stone-200">${w.turn}</span>/${w.maxTurns}</span>
+       ${stat('☺',v.pop,v.pop<=4)} ${stat('🌾',v.food,v.food<=2)} ${stat('💧',v.water,v.water<=2)} ${stat('morale',v.morale,v.morale<=25)}
+       <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${w.tension}</span>
+       <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
+     </div>
+     <a href="./index.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">board view ▸</a>
+   </div>
+   ${shrineMenu ? `<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center">
+       <p class="serif text-lg text-violet-200 mb-2">At the shrine…</p>
+       <div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<div class="mono text-[11px] px-3 py-2 rounded border border-stone-700 text-stone-200"><b class="text-amber-300">${i+1}</b> offer to ${PANTHEON[d].name.split(',')[0]}</div>`).join('')}</div>
+       <p class="mono text-[9px] text-stone-600 mt-2">press 1–4 · or walk away</p></div>` : ''}
+   ${!shrineMenu && near && !busy && !w.over ? `<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center">
+       <span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${near.shrine?near.name2:near.label} — <span class="text-stone-500">${near.name}</span></span></div>` : ''}
+   ${omen ? `<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent">
+       <div class="max-w-2xl mx-auto text-center">
+         <p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>
+         ${pending && !pending.result ? `<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center">
+             <span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? press 1–4</span>
+             ${DEITY_IDS.map((d,i)=>`<button onclick="window.__acc(${i})" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}
+           </div>`
+         : pending && pending.result ? `<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ you said '+PANTHEON[pending.result.guess].name.split(',')[0]} — it was ${PANTHEON[pending.actual].name.split(',')[0]}</p>`
+         : ''}
+       </div></div>` : ''}
+   ${w.over ? `<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto">
+       <div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">${w.won?'The vale endures.':'The vale is empty.'}</p>
+       <p class="serif italic text-stone-400 mt-2">You read ${correct}/${reads.length} of their hands.</p>
+       <button onclick="window.restart()" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>` : ''}`;
+}
+window.__acc = accuse;
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

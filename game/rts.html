@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THEODICY · RTS — the vale defended</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=JetBrains+Mono&display=swap');
+  body{background:#0c0a09;overflow:hidden}
+  .serif{font-family:'EB Garamond',Georgia,serif}.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  canvas{display:block;cursor:crosshair}
+</style>
+</head>
+<body class="text-stone-300">
+<!--
+  THEODICY · RTS — first vertical slice of the True-RTS combat layer.
+  Real-time: harvest grain -> build a barracks -> raise soldiers -> hold the vale
+  against Kel's raiders. Self-contained canvas + vanilla JS (no framework, no
+  external assets) so it stays CSP-safe for an HF static Space and cannot
+  destabilise the god-sim in game/index.html.
+
+  The theodicy spine survives the genre change: the four gods are a DIVINE
+  INTERVENTION layer that scores a menu of legal bids, with the same guarantees —
+  the escalation streak is capped and then Oss (mercy) is the only legal actor,
+  and Kel has no merciful verb, so war can never heal you.
+-->
+<div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
+<canvas id="c"></canvas>
+
+<script>
+// ---------------------------------------------------------------------------
+// CONFIG
+// ---------------------------------------------------------------------------
+const W = () => cv.width, H = () => cv.height;
+const TYPES = {
+  keep:     { r: 26, hp: 500, side: 'you', color: '#d6c48a', build: true },
+  barracks: { r: 20, hp: 220, side: 'you', color: '#9a8358' },
+  field:    { r: 16, hp: 9999, side: 'neutral', color: '#5b6b25' },
+  camp:     { r: 24, hp: 800, side: 'foe', color: '#7f1d1d' },
+  worker:   { r: 7,  hp: 30,  side: 'you', color: '#c9b892', spd: 62, atk: 2,  rng: 12, cd: 0.8, carry: 8 },
+  soldier:  { r: 9,  hp: 90,  side: 'you', color: '#e5e7eb', spd: 74, atk: 12, rng: 16, cd: 0.9 },
+  raider:   { r: 9,  hp: 70,  side: 'foe', color: '#fb7185', spd: 66, atk: 10, rng: 16, cd: 1.0 },
+};
+const COST = { barracks: 40, soldier: 20 };
+
+// ---------------------------------------------------------------------------
+// STATE
+// ---------------------------------------------------------------------------
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let ents = [], grain = 60, wave = 0, waveTimer = 8, tension = 10, over = null;
+let sel = new Set(), drag = null, build = null, omen = '', omenT = 0, flash = null;
+let ids = 1; const E = (t, x, y, extra = {}) => { const b = TYPES[t]; const e = { id: ids++, t, x, y, hp: b.hp, maxHp: b.hp, cool: 0, ...b, ...extra }; ents.push(e); return e; };
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const foesOf = (side) => ents.filter(e => e.hp > 0 && e.side !== side && e.side !== 'neutral');
+
+function resize() { cv.width = innerWidth; cv.height = innerHeight; }
+addEventListener('resize', resize); resize();
+
+function newGame() {
+  ents = []; grain = 60; wave = 0; waveTimer = 8; tension = 10; over = null; sel.clear(); build = null; omen = ''; div.streak = 0; div.pool = 0; div.cd = {};
+  devotion = 0; level = 1; points = 1; mana = 45; manaMax = 45; rally = 0; unlocked = new Set(); castCd = {}; showTree = false;
+  const cx = W() * 0.5, cy = H() * 0.78;
+  E('keep', cx, cy);
+  for (let i = 0; i < 4; i++) E('worker', cx - 40 + i * 26, cy - 46);
+  // fields scattered mid-map
+  for (let i = 0; i < 5; i++) E('field', W() * (0.28 + i * 0.11) + (i % 2 ? 20 : -20), H() * (0.5 + (i % 2) * 0.08), { amount: 400 });
+  E('camp', W() * 0.5, H() * 0.12);
+}
+
+// ---------------------------------------------------------------------------
+// THE DIVINE LAYER — the theodicy thesis, inside the RTS.
+// Tension fills a pool; when it spills, the angriest god that can legally act
+// acts. Escalation is capped: after 3 escalating divine acts in a row, Oss
+// (mercy) is the ONLY legal actor. Kel has no merciful verb — war never heals.
+// ---------------------------------------------------------------------------
+const GODS = {
+  vurm:  { color:'#f59e0b', verbs:['flood'] },                 // slows raiders
+  kel:   { color:'#fb7185', verbs:['arm','raid'], hostile:true }, // buffs/spawns raiders
+  oss:   { color:'#34d399', verbs:['respite'], merciful:true },// heals you, cools tension
+  ithra: { color:'#a78bfa', verbs:['bargain'] },               // grain now, debt later
+};
+const ESC = { flood:true, arm:true, raid:true, respite:false, bargain:false };
+const div = { pool: 0, streak: 0, cd: {}, debt: 0 };
+
+// ---------------------------------------------------------------------------
+// RPG LAYER — Devotion (XP), levels, and the Covenant Board of god-powers.
+// Holding the vale earns Devotion; each level grants a Covenant point; points
+// unlock powers you cast in the fight. This is the RPG spine on the RTS combat.
+// ---------------------------------------------------------------------------
+let devotion = 0, level = 1, points = 1, mana = 45, manaMax = 45, rally = 0;
+let unlocked = new Set(), castCd = {}, showTree = false;
+const nextLevel = (lv) => 40 + (lv - 1) * 30;              // devotion to next level
+const GODC = { vurm:'#f59e0b', kel:'#fb7185', oss:'#34d399', ithra:'#a78bfa' };
+const POWERS = {
+  flood:  { god:'vurm',  name:'Flood',  cost:22, cd:12, pts:1, desc:'slow every raider (5s)',
+            cast:()=>{ ents.forEach(e=>e.t==='raider'&&(e.slow=5)); fx('#f59e0b','Vurm: water where none should be.'); } },
+  parch:  { god:'vurm',  name:'Parch',  cost:30, cd:15, pts:2, desc:'sear all foes (burn)',
+            cast:()=>{ foesOf('you').forEach(e=>e.burn=4); fx('#f59e0b','Vurm: the ground cracks and smokes.'); } },
+  rally:  { god:'kel',   name:'Rally',  cost:20, cd:11, pts:1, desc:'+60% soldier attack (6s)',
+            cast:()=>{ rally=6; fx('#fb7185','Kel: your blades remember their grudge.'); } },
+  muster: { god:'kel',   name:'Muster', cost:34, cd:16, pts:2, desc:'conscript 3 soldiers',
+            cast:()=>{ const k=ents.find(e=>e.t==='keep'); if(k)for(let i=0;i<3;i++)E('soldier',k.x-30+i*30,k.y+42,{dest:{x:k.x,y:k.y+60}}); fx('#fb7185','Kel: the vale takes up iron.'); } },
+  mend:   { god:'oss',   name:'Mend',   cost:24, cd:11, pts:1, desc:'heal your line 40%',
+            cast:()=>{ ents.forEach(e=>e.side==='you'&&(e.hp=Math.min(e.maxHp,e.hp+e.maxHp*0.4))); fx('#34d399','Oss: the wounded rise.'); } },
+  ward:   { god:'oss',   name:'Ward',   cost:30, cd:18, pts:2, desc:'shield the keep (6s)',
+            cast:()=>{ const k=ents.find(e=>e.t==='keep'); if(k)k.ward=6; fx('#34d399','Oss: a stillness guards the gate.'); } },
+  tithe:  { god:'ithra', name:'Tithe',  cost:14, cd:8,  pts:1, desc:'+70 grain now',
+            cast:()=>{ grain+=70; fx('#a78bfa','Ithra: grain, unasked, at the gate.'); } },
+  exact:  { god:'ithra', name:'Exact',  cost:34, cd:15, pts:2, desc:'smite the strongest foe',
+            cast:()=>{ const fo=foesOf('you').filter(e=>e.side==='foe'); if(fo.length){fo.sort((a,b)=>b.hp-a.hp);fo[0].hp-=150;} fx('#a78bfa','Ithra: the ledger closes a line.'); } },
+};
+const POWER_KEYS = Object.keys(POWERS);
+function fx(c, t) { flash = { c, t: 1 }; omen = t; omenT = 3.5; }
+function gainDevotion(n) {
+  devotion += n;
+  while (devotion >= nextLevel(level)) {
+    devotion -= nextLevel(level); level++; points++; manaMax += 12; mana = manaMax;
+    const k = ents.find(e => e.t === 'keep'); if (k) k.hp = Math.min(k.maxHp, k.hp + 90);
+    fx('#e7e5e4', `The vale grows — level ${level}. A Covenant point is yours.`);
+  }
+}
+function unlock(key) { const pw = POWERS[key]; if (points >= pw.pts && !unlocked.has(key)) { points -= pw.pts; unlocked.add(key); } }
+function cast(key) {
+  const pw = POWERS[key];
+  if (!pw || !unlocked.has(key) || (castCd[key] || 0) > 0 || mana < pw.cost || over) return;
+  mana -= pw.cost; castCd[key] = pw.cd; pw.cast();
+}
+window.unlock = unlock; window.cast = cast; window.toggleTree = () => { showTree = !showTree; };
+
+function divineAnger(k) {
+  const foes = foesOf('you').length, keep = ents.find(e => e.t === 'keep');
+  const keepPct = keep ? keep.hp / keep.maxHp : 0;
+  return ({
+    kel:   40 + tension * 0.6 + foes * 3,
+    oss:   (1 - keepPct) * 80 + Math.max(0, 40 - grain) * 0.5,
+    vurm:  tension * 0.5 + foes * 1.5,
+    ithra: div.debt * 30 + Math.max(0, 30 - grain),
+  })[k];
+}
+function divineAct() {
+  const forced = div.streak >= 3;                       // anti-escalation guarantee
+  let legal = Object.keys(GODS).filter(k => (div.cd[k] || 0) <= 0);
+  if (forced) legal = legal.filter(k => GODS[k].merciful); // only Oss may act
+  if (!legal.length) legal = ['oss'];
+  const k = legal.reduce((a, b) => divineAnger(a) >= divineAnger(b) ? a : b);
+  let verb = GODS[k].verbs[Math.floor(Math.random() * GODS[k].verbs.length)];
+  if (forced) verb = 'respite';
+  applyDivine(k, verb);
+  div.cd[k] = 3; for (const kk in div.cd) div.cd[kk]--;
+  div.streak = ESC[verb] ? div.streak + 1 : 0;
+}
+function applyDivine(k, verb) {
+  const say = (t) => { omen = t; omenT = 4; flash = { c: GODS[k].color, t: 1 }; };
+  if (verb === 'flood')   { ents.forEach(e => e.t === 'raider' && (e.slow = 3)); say('Vurm: water where water has never been. The raiders wade.'); }
+  if (verb === 'arm')     { ents.forEach(e => e.t === 'raider' && (e.atk *= 1.4)); say('Kel: someone has been selling iron on the road.'); }
+  if (verb === 'raid')    { spawnWave(2 + (wave >> 1), true); say('Kel: smoke on the ridge, and no one lit it.'); }
+  if (verb === 'respite') { ents.forEach(e => e.side === 'you' && (e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.35))); tension = Math.max(0, tension - 30); say('Oss: a child who was sick is not. The wounded rise.'); }
+  if (verb === 'bargain') { grain += 45; div.debt++; say('Ithra: grain at the gate, unsigned and heavy. A price, later.'); }
+}
+
+// ---------------------------------------------------------------------------
+// WAVES
+// ---------------------------------------------------------------------------
+function spawnWave(n, extra) {
+  const camp = ents.find(e => e.t === 'camp'); if (!camp) return;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, d = 30 + Math.random() * 30;
+    E('raider', camp.x + Math.cos(a) * d, camp.y + Math.sin(a) * d);
+  }
+  if (!extra) { wave++; say(`The ${ordinal(wave)} raid comes down the ridge.`); }
+}
+function say(t) { omen = t; omenT = 4; }
+const ordinal = (n) => { const s = ['th','st','nd','rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+
+// ---------------------------------------------------------------------------
+// AI + MOVEMENT
+// ---------------------------------------------------------------------------
+function moveTo(e, tx, ty, dt) {
+  const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy) || 1;
+  const s = e.spd * (e.slow > 0 ? 0.45 : 1) * dt;
+  if (d > s) { e.x += dx / d * s; e.y += dy / d * s; return false; }
+  e.x = tx; e.y = ty; return true;
+}
+function nearest(e, list) { let best = null, bd = 1e9; for (const o of list) { const d = dist(e, o); if (d < bd) { bd = d; best = o; } } return best; }
+
+function tickUnit(e, dt) {
+  e.cool = Math.max(0, e.cool - dt); if (e.slow > 0) e.slow -= dt;
+  if (e.t === 'worker' && !e.forceFight) return tickWorker(e, dt);
+
+  // pick a target: an explicit order, else auto-acquire (foes always aggro;
+  // player soldiers defend a short leash around wherever they stand).
+  const tgt = e.attackTgt && e.attackTgt.hp > 0 ? e.attackTgt : nearest(e, foesOf(e.side));
+  const leashed = tgt && (e.side === 'foe' || e.attackTgt || e.aMove || (e.t !== 'worker' && dist(e, tgt) < 150));
+
+  if (tgt && leashed) {
+    if (dist(e, tgt) <= e.rng + tgt.r) {                    // in range → strike
+      if (e.cool <= 0) {
+        const dmg = e.atk * (e.t === 'soldier' && rally > 0 ? 1.6 : 1);   // Kel's Rally
+        if (!(tgt.ward > 0)) tgt.hp -= dmg;                                // Oss's Ward
+        e.cool = e.cd; tension = Math.min(100, tension + 0.4);
+      }
+    } else moveTo(e, tgt.x, tgt.y, dt);                     // else close the distance
+  } else if (e.dest && moveTo(e, e.dest.x, e.dest.y, dt)) {
+    e.dest = null;                                          // reached the ordered point
+  }
+}
+function tickWorker(e, dt) {
+  const keep = ents.find(o => o.t === 'keep');
+  if (e.load >= e.carry) { if (keep && moveTo(e, keep.x, keep.y, dt)) { grain += e.load; e.load = 0; } return; }
+  let f = e.field && e.field.amount > 0 ? e.field : nearest(e, ents.filter(o => o.t === 'field' && o.amount > 0));
+  e.field = f; if (!f) { if (e.dest) moveTo(e, e.dest.x, e.dest.y, dt); return; }
+  if (dist(e, f) <= e.rng + f.r) { if (e.cool <= 0) { const take = Math.min(2, f.amount, e.carry - (e.load || 0)); e.load = (e.load || 0) + take; f.amount -= take; e.cool = e.cd; } }
+  else moveTo(e, f.x, f.y, dt);
+}
+function tickBuilding(e, dt) {
+  if (e.t === 'barracks') {
+    e.prod = (e.prod || 0) - dt;
+    if (e.prod <= 0 && grain >= COST.soldier) { grain -= COST.soldier; E('soldier', e.x + (Math.random() * 30 - 15), e.y + 34, { aMove: false, dest: { x: e.x, y: e.y + 50 } }); e.prod = 3.5; }
+  }
+  if (e.t === 'camp') { e.spawn = (e.spawn || 12) - dt; if (e.spawn <= 0) { spawnWave(3 + Math.floor(wave * 0.7)); e.spawn = Math.max(9, 22 - wave); } }
+}
+
+// ---------------------------------------------------------------------------
+// LOOP
+// ---------------------------------------------------------------------------
+let last = 0;
+function frame(ts) {
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
+  if (!over) { step(dt); }
+  render();
+  requestAnimationFrame(frame);
+}
+function step(dt) {
+  omenT = Math.max(0, omenT - dt); if (flash) flash.t -= dt * 1.5;
+  tension = Math.max(0, tension - dt * 0.8);                 // tension bleeds off
+  mana = Math.min(manaMax, mana + dt * 6);                   // mana regen
+  if (rally > 0) rally -= dt;
+  for (const kk in castCd) if (castCd[kk] > 0) castCd[kk] -= dt;
+  for (const e of ents) { if (e.burn > 0) { e.hp -= 9 * dt; e.burn -= dt; } if (e.ward > 0) e.ward -= dt; }
+  div.pool += dt * (0.4 + tension * 0.02);
+  if (div.pool >= 10) { div.pool = 0; divineAct(); }
+  for (const e of ents) { if (e.hp <= 0) continue; if (e.spd) tickUnit(e, dt); else tickBuilding(e, dt); }
+  const kills = ents.filter(e => e.t === 'raider' && e.hp <= 0).length;   // Devotion for the fallen
+  if (kills) gainDevotion(kills * 3);
+  ents = ents.filter(e => e.hp > 0 || e.t === 'field');
+  ents = ents.filter(e => !(e.t === 'field' && e.amount <= 0));
+  sel = new Set([...sel].filter(e => e.hp > 0));
+  // win / lose
+  if (!ents.find(e => e.t === 'keep')) over = { win: false };
+  else if (!ents.find(e => e.t === 'camp') && !ents.find(e => e.t === 'raider')) over = { win: true };
+}
+
+// ---------------------------------------------------------------------------
+// RENDER
+// ---------------------------------------------------------------------------
+function render() {
+  g.fillStyle = '#0c0a09'; g.fillRect(0, 0, W(), H());
+  // ridge band
+  const grad = g.createLinearGradient(0, 0, 0, H());
+  grad.addColorStop(0, `rgba(${60 + tension * 1.5 | 0},20,20,0.5)`); grad.addColorStop(0.4, 'rgba(20,16,14,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, W(), H() * 0.5);
+  // entities
+  for (const e of ents) drawEnt(e);
+  // selection box
+  if (drag) { g.strokeStyle = '#a8a29e'; g.setLineDash([4, 4]); g.strokeRect(drag.x0, drag.y0, drag.x - drag.x0, drag.y - drag.y0); g.setLineDash([]); }
+  if (build) { g.fillStyle = grain >= COST.barracks ? '#9a835888' : '#7f1d1d88'; g.beginPath(); g.arc(mouse.x, mouse.y, TYPES.barracks.r, 0, 7); g.fill(); }
+  if (flash && flash.t > 0) { g.fillStyle = flash.c; g.globalAlpha = flash.t * 0.15; g.fillRect(0, 0, W(), H()); g.globalAlpha = 1; }
+  drawUI();
+}
+function drawEnt(e) {
+  g.save(); g.translate(e.x, e.y);
+  if (sel.has(e)) { g.strokeStyle = '#e7e5e4'; g.lineWidth = 2; g.beginPath(); g.arc(0, 0, e.r + 4, 0, 7); g.stroke(); }
+  g.fillStyle = e.color;
+  if (e.t === 'keep' || e.t === 'barracks' || e.t === 'camp') { g.fillRect(-e.r, -e.r, e.r * 2, e.r * 2); g.strokeStyle = '#0f0c0b'; g.strokeRect(-e.r, -e.r, e.r * 2, e.r * 2); }
+  else if (e.t === 'field') { g.globalAlpha = 0.5 + 0.5 * (e.amount / 400); g.fillRect(-e.r, -e.r * 0.7, e.r * 2, e.r * 1.4); g.globalAlpha = 1; }
+  else { g.beginPath(); g.arc(0, 0, e.r, 0, 7); g.fill(); if (e.t === 'raider') { g.strokeStyle = '#450a0a'; g.stroke(); } }
+  // hp bar
+  if (e.hp < e.maxHp && e.maxHp < 9999) { g.fillStyle = '#111'; g.fillRect(-e.r, -e.r - 7, e.r * 2, 3); g.fillStyle = e.side === 'foe' ? '#fb7185' : '#34d399'; g.fillRect(-e.r, -e.r - 7, e.r * 2 * (e.hp / e.maxHp), 3); }
+  if (e.load) { g.fillStyle = '#f59e0b'; g.fillRect(-2, -e.r - 3, 4, 3); }
+  g.restore();
+}
+
+// ---------------------------------------------------------------------------
+// UI (DOM overlay)
+// ---------------------------------------------------------------------------
+const ui = document.getElementById('ui');
+function drawUI() {
+  const dvPct = Math.min(100, 100 * devotion / nextLevel(level));
+  const mnPct = Math.min(100, 100 * mana / manaMax);
+  const hotbar = POWER_KEYS.filter(k => unlocked.has(k)).map(k => {
+    const pw = POWERS[k], cd = castCd[k] || 0, ready = cd <= 0 && mana >= pw.cost;
+    return `<button onclick="cast('${k}')" ${ready ? '' : 'disabled'} title="${pw.desc} · ${pw.cost} mana"
+      class="relative mono text-[10px] px-2.5 py-2 rounded border ${ready ? 'hover:brightness-150' : 'opacity-40'}"
+      style="border-color:${GODC[pw.god]}66;color:${GODC[pw.god]}">${pw.name}<span class="text-stone-500"> ${pw.cost}</span>
+      ${cd > 0 ? `<span class="absolute inset-0 grid place-items-center bg-black/65 rounded text-stone-300">${cd.toFixed(0)}s</span>` : ''}</button>`;
+  }).join('');
+  const branch = (gd) => `<div class="border border-stone-800 rounded p-3">
+      <div class="serif text-sm mb-2" style="color:${GODC[gd]}">${gd[0].toUpperCase() + gd.slice(1)}</div>
+      ${POWER_KEYS.filter(k => POWERS[k].god === gd).map(k => { const pw = POWERS[k], has = unlocked.has(k);
+        return `<div class="mb-2.5"><div class="mono text-[11px] ${has ? 'text-stone-100' : 'text-stone-400'}">${pw.name}${has ? ' ✓' : ''}</div>
+          <div class="mono text-[8px] text-stone-600 leading-tight">${pw.desc} · ${pw.cost} mana</div>
+          ${has ? '' : `<button onclick="unlock('${k}')" ${points >= pw.pts ? '' : 'disabled'}
+            class="mt-1 mono text-[9px] px-2 py-0.5 rounded border ${points >= pw.pts ? 'border-stone-500 text-stone-200 hover:bg-stone-800' : 'border-stone-800 text-stone-600'}">unlock · ${pw.pts}pt</button>`}</div>`;
+      }).join('')}</div>`;
+  const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" onclick="toggleTree()">
+    <div class="max-w-3xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" onclick="event.stopPropagation()">
+      <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Covenant Board</h2>
+        <span class="mono text-xs text-amber-300">${points} covenant point${points !== 1 ? 's' : ''}</span></div>
+      <div class="grid grid-cols-4 gap-3">${['vurm','kel','oss','ithra'].map(branch).join('')}</div>
+      <p class="serif italic text-stone-500 text-xs mt-4">Hold the vale to earn Devotion; each level grants a point. Unlock a god's power, then wield it in the fight.</p>
+      <button onclick="toggleTree()" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸</button>
+    </div></div>` : '';
+
+  ui.innerHTML = `
+   <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
+     <div class="flex gap-5 items-center">
+       <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· the vale defended</span></span>
+       <span class="mono text-xs text-stone-300">Lv ${level}</span>
+       <span class="mono text-[10px] text-stone-500">devotion</span><span class="inline-block w-24 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-amber-500" style="width:${dvPct}%"></span></span>
+       <span class="mono text-[10px] text-sky-400">mana ${mana | 0}</span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-sky-500" style="width:${mnPct}%"></span></span>
+       <span class="mono text-xs text-amber-300">🌾 ${grain | 0}</span>
+       <span class="mono text-xs text-stone-400">wave ${wave}</span>
+       <span class="mono text-xs ${tension > 65 ? 'text-rose-400' : 'text-stone-500'}">tension ${tension | 0}</span>
+     </div>
+     <div class="mono text-[10px] text-stone-500">drag-select · right-click move/attack</div>
+   </div>
+   <div class="absolute bottom-0 inset-x-0 px-5 py-3 bg-gradient-to-t from-black/85 to-transparent flex items-end justify-between gap-4">
+     <div class="pointer-events-auto flex gap-2 items-end flex-wrap">
+       <button onclick="startBuild()" class="mono text-[11px] px-3 py-2 rounded border ${grain >= COST.barracks ? 'border-stone-600 text-stone-200 hover:bg-stone-800' : 'border-stone-800 text-stone-600'}">＋ Barracks <span class="text-stone-500">(${COST.barracks}🌾)</span></button>
+       <button onclick="toggleTree()" class="mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40">✦ Covenant${points ? ` (${points})` : ''}</button>
+       ${hotbar ? `<span class="mx-1 self-center text-stone-700">|</span>${hotbar}` : `<span class="mono text-[10px] text-stone-600 self-center">open the Covenant to unlock god-powers ▸</span>`}
+     </div>
+     ${omenT > 0 ? `<div class="serif italic text-stone-200 text-lg max-w-md text-right shrink-0">“${omen}”</div>` : ''}
+   </div>
+   ${tree}
+   ${over ? `<div class="absolute inset-0 grid place-items-center bg-black/70 pointer-events-auto">
+     <div class="text-center">
+       <p class="serif text-4xl ${over.win ? 'text-emerald-300' : 'text-rose-300'}">${over.win ? 'The vale holds.' : 'The vale is taken.'}</p>
+       <p class="serif italic text-stone-400 mt-2">Level ${level} · ${over.win ? 'you never learned which of them stayed Kel’s hand.' : 'you never learned which of them opened the gate.'}</p>
+       <button onclick="newGame()" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin again ▸</button>
+     </div></div>` : ''}`;
+}
+
+// ---------------------------------------------------------------------------
+// INPUT
+// ---------------------------------------------------------------------------
+const mouse = { x: 0, y: 0 };
+window.startBuild = () => { if (grain >= COST.barracks) build = 'barracks'; };
+window.newGame = newGame;
+cv.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; if (drag) { drag.x = e.clientX; drag.y = e.clientY; } });
+cv.addEventListener('mousedown', e => {
+  if (e.button === 0) {
+    if (build) { placeBuild(mouse.x, mouse.y); return; }
+    drag = { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
+  }
+});
+cv.addEventListener('mouseup', e => {
+  if (e.button === 0 && drag) {
+    const x1 = Math.min(drag.x0, drag.x), x2 = Math.max(drag.x0, drag.x), y1 = Math.min(drag.y0, drag.y), y2 = Math.max(drag.y0, drag.y);
+    sel.clear();
+    const box = Math.hypot(x2 - x1, y2 - y1) > 6;
+    for (const en of ents) {
+      if (en.side !== 'you' || !en.spd) continue;
+      if (box) { if (en.x >= x1 && en.x <= x2 && en.y >= y1 && en.y <= y2) sel.add(en); }
+      else if (dist(en, { x: e.clientX, y: e.clientY }) < en.r + 6) sel.add(en);
+    }
+    drag = null;
+  }
+});
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const p = { x: e.clientX, y: e.clientY };
+  const foe = ents.find(o => o.side === 'foe' && dist(o, p) < o.r + 10);
+  for (const en of sel) {
+    en.attackTgt = foe || null; en.dest = foe ? null : { x: p.x, y: p.y }; en.aMove = !!foe; en.forceFight = en.t === 'worker' && !!foe;
+    if (en.t === 'worker' && !foe) { en.field = null; en.forceFight = false; en.dest = { x: p.x, y: p.y }; }
+  }
+});
+function placeBuild(x, y) { if (grain < COST.barracks) { build = null; return; } grain -= COST.barracks; E('barracks', x, y, { prod: 3 }); build = null; }
+
+newGame();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

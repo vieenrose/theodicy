@@ -26,7 +26,7 @@ Usage:
     python make_dataset.py --n 20000 --out data/god_bids.jsonl
     python make_dataset.py --n 8000 --mode teacher --teacher Qwen/Qwen3-4B-Instruct-2507
 """
-import argparse, json, random, math, os, sys
+import argparse, json, random, math, os, sys, re
 from pathlib import Path
 
 DEITIES = {
@@ -105,6 +105,68 @@ PROMPT = ("You are the pantheon over a small valley. You perceive only this:\n{d
           "The ledger of what you have already done (your past binds you):\n{ledger}\n\n"
           "The next act is:\n")
 
+# --- teacher labelling -------------------------------------------------------
+# Instruct teachers do NOT follow a raw completion prompt — they need their chat
+# template (the old raw-prompt path yielded a 0% legal-parse rate). We render the
+# chat template, disable "thinking" where the model supports it (Qwen3), and parse
+# leniently: the first legal deity:verb found anywhere, with any text after '||'
+# as the omen. Sub-2B models still hallucinate gods; use ~1.5B+ instruct.
+TEACHER_SYS = (
+    "You are a capricious pantheon of four gods judging a small valley. From the LEGAL ACTS "
+    "list ONLY, choose EXACTLY ONE act and utter a one-sentence omen. Reply on ONE line, no "
+    "preamble, exactly in this form:  deity:verb || omen  "
+    "(the deity:verb pair MUST be copied verbatim from the legal list)."
+)
+# For BASE teachers (no chat template) we few-shot instead. The exemplars span all
+# four gods so the base model doesn't collapse onto one — and they seed the strange,
+# oracular omen voice we actually want.
+TEACHER_FEWSHOT = (
+    "You are a capricious pantheon judging a valley. Choose ONE act from the legal list "
+    "and give a one-line omen.\n\n"
+    "World: turn 6/30 | tension 70 bandits 6 | favor kel -12\nLegal acts: kel:raid, kel:arm, oss:mend\n"
+    "Ruling: kel:raid || Smoke on the ridge, and no one lit it.\n\n"
+    "World: turn 9/30 | morale 22 water 2\nLegal acts: oss:mend, oss:respite, vurm:parch\n"
+    "Ruling: oss:respite || For nine days, no sign at all.\n\n"
+    "World: turn 12/30 | debts 2 shrine desecrated\nLegal acts: ithra:exact, ithra:reveal, kel:betray\n"
+    "Ruling: ithra:exact || The grain you did not count is gone.\n\n"
+    "World: turn 4/30 | water 1 well fouled\nLegal acts: vurm:parch, vurm:poison, oss:shelter\n"
+    "Ruling: vurm:poison || A pale film sits on the water at dawn.\n\n"
+)
+
+def teacher_label(teacher, w, opts):
+    """Return (deity, verb, omen|None) from the teacher, or None if it produced
+    nothing legal — caller then keeps the heuristic label. Handles both instruct
+    teachers (chat template) and base teachers (few-shot completion)."""
+    import torch
+    t_tok, t_model = teacher
+    menu = ", ".join(f"{a}:{b}" for a, b in opts)
+    chat = getattr(t_tok, "chat_template", None)
+    if chat:
+        msgs = [{"role": "system", "content": TEACHER_SYS},
+                {"role": "user", "content": f"World: {digest(w)}\nLEGAL ACTS: {menu}\nYour ruling:"}]
+        try:
+            prompt = t_tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True,
+                                               enable_thinking=False)
+        except TypeError:
+            prompt = t_tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    else:
+        prompt = TEACHER_FEWSHOT + f"World: {digest(w)}\nLegal acts: {menu}\nRuling:"
+    ids = t_tok(prompt, return_tensors="pt", return_token_type_ids=False).to(t_model.device)
+    with torch.no_grad():
+        out = t_model.generate(**ids, max_new_tokens=48, do_sample=True, temperature=0.95,
+                               top_p=0.92, pad_token_id=t_tok.eos_token_id)
+    txt = t_tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+    txt = re.sub(r"<think>.*?</think>", " ", txt, flags=re.S)
+    # base models keep generating the NEXT fake example, so cut at the first newline;
+    # chat models put the whole answer on one turn, so flatten newlines.
+    txt = (txt.split("\n")[0] if not chat else txt.replace("\n", " ")).strip()
+    for m in re.finditer(r"([a-zA-Z]+)\s*:\s*([a-zA-Z]+)", txt):
+        d, v = m.group(1).lower(), m.group(2).lower()
+        if (d, v) in opts:
+            omen = txt.split("||")[-1].strip() if "||" in txt else ""
+            return d, v, (omen[:120] if len(omen) >= 6 else None)
+    return None
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20000)
@@ -119,10 +181,12 @@ def main():
 
     teacher = None
     if args.mode == "teacher":
-        from transformers import pipeline
         import torch
-        teacher = pipeline("text-generation", model=args.teacher,
-                           torch_dtype=torch.bfloat16, device_map="auto")
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        t_tok = AutoTokenizer.from_pretrained(args.teacher)
+        t_model = AutoModelForCausalLM.from_pretrained(
+            args.teacher, dtype=torch.bfloat16, device_map="auto").eval()
+        teacher = (t_tok, t_model)
 
     n_written = 0
     with open(args.out, "w") as f:
@@ -135,17 +199,11 @@ def main():
 
             if teacher is not None:
                 opts = legal(w)
-                menu = ", ".join(f"{a}:{b}" for a, b in opts)
-                q = (f"World: {digest(w)}\nLegal acts: {menu}\n"
-                     f"Pick ONE act and give a one-sentence omen. "
-                     f"Reply exactly as: <deity>:<verb> || <omen>")
                 try:
-                    r = teacher(q, max_new_tokens=48, do_sample=True, temperature=0.9)[0]["generated_text"]
-                    tail = r[len(q):].strip().splitlines()[0]
-                    pick, omen = tail.split("||")
-                    dd, vv = pick.strip().split(":")
-                    if (dd.strip(), vv.strip()) in opts:
-                        d, v, reason = dd.strip(), vv.strip(), omen.strip()[:120]
+                    tl = teacher_label(teacher, w, opts)
+                    if tl is not None:
+                        d, v = tl[0], tl[1]
+                        reason = tl[2] if tl[2] else "(teacher)"   # marks a teacher-labelled row
                 except Exception:
                     pass  # teacher failed, keep the heuristic label
 

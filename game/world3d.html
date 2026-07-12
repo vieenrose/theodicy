@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THEODICY · 3D — the vale</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=JetBrains+Mono&display=swap');
+  html,body{margin:0;height:100%;background:#0c0a09;overflow:hidden}
+  .serif{font-family:'EB Garamond',Georgia,serif}.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  canvas{display:block}
+</style>
+</head>
+<body class="text-stone-300">
+<!--
+  world3d.html — the vale in 3D (three.js, CDN ES-modules, no build → CSP-safe).
+  Walk in three dimensions (WASD / arrows), approach a god-site, press E to act.
+  The four painted gods hover over their domains as billboards, glowing by wrath.
+  Same engine.js truth; the god still just generates a lawful action.
+-->
+<div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { newWorld, stepTurn, PANTHEON, DEITY_IDS, ranking } from './engine.js';
+import { HeuristicGod } from './gods.js';
+
+// ---- engine state ----
+let w = newWorld(), god = new HeuristicGod((Date.now() & 0xffff) || 1);
+let omen = null, pending = null, reads = [], busy = false, shrineMenu = false;
+
+// ---- three.js scene ----
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0a09);
+scene.fog = new THREE.Fog(0x0c0a09, 60, 240);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.appendChild(renderer.domElement);
+addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+scene.add(new THREE.HemisphereLight(0x8899bb, 0x1a1410, 0.55));
+const key = new THREE.DirectionalLight(0xffd9a8, 1.0); key.position.set(-40, 60, 20); scene.add(key);
+const ember = new THREE.PointLight(0xff5533, 0.0, 220); ember.position.set(30, 30, -60); scene.add(ember); // grows with tension
+
+// ground
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
+  new THREE.MeshStandardMaterial({ color: 0x1a2418, roughness: 1 }));
+ground.rotation.x = -Math.PI/2; scene.add(ground);
+// river (a flat ribbon)
+const river = new THREE.Mesh(new THREE.PlaneGeometry(220, 8),
+  new THREE.MeshStandardMaterial({ color: 0x24557d, roughness: 0.4, metalness: 0.2 }));
+river.rotation.x = -Math.PI/2; river.rotation.z = 0.5; river.position.set(-10, 0.1, 10); scene.add(river);
+// northern ridge (cones)
+for (let i=0;i<9;i++){ const h=14+Math.random()*16; const c=new THREE.Mesh(new THREE.ConeGeometry(10+Math.random()*8, h, 5),
+  new THREE.MeshStandardMaterial({ color: 0x16100b, roughness:1 })); c.position.set(-90+i*22, h/2-1, -95+Math.random()*10); scene.add(c); }
+
+// ---- god-sites ----
+const SITES = {
+  well:    { pos:[-55, 0, 12],  deity:'vurm',  name:'The Thirsting Well', act:{action:'tend_well'}, label:'draw & tend the water' },
+  fields:  { pos:[-8, 0, 45],   deity:null,    name:'The Fields',         act:{action:'harvest'},   label:'harvest' },
+  village: { pos:[8, 0, 8],     deity:null,    name:'Aldermere',          act:{action:'rest'},      label:'rest the village' },
+  wall:    { pos:[42, 0, -6],   deity:null,    name:'The Palisade',       act:{action:'fortify'},   label:'fortify' },
+  ridge:   { pos:[36, 0, -70],  deity:'kel',   name:'The Grudge Ridge',   act:{action:'harvest'},   label:'watch the treeline' },
+  shrine:  { pos:[70, 0, 40],   deity:'ithra', name:'The Ledger Shrine',  shrine:true,              label:'offer, settle, desecrate' },
+};
+const tex = new THREE.TextureLoader();
+const billboards = {};
+for (const [id, s] of Object.entries(SITES)) {
+  const grp = new THREE.Group(); grp.position.set(s.pos[0], 0, s.pos[2]); scene.add(grp); s.grp = grp;
+  // landmark base
+  if (id==='well'){ const ring=new THREE.Mesh(new THREE.CylinderGeometry(3,3,2,16), new THREE.MeshStandardMaterial({color:0x3f3f46})); ring.position.y=1; grp.add(ring); const water=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.2,0.3,16), new THREE.MeshStandardMaterial({color:0x3b82c4,emissive:0x0a2a44})); water.position.y=2; grp.add(water); s.water=water; }
+  else if (id==='village'){ for(let i=0;i<5;i++){const a=i/5*6.28; const hut=new THREE.Mesh(new THREE.BoxGeometry(3,3,3), new THREE.MeshStandardMaterial({color:0x2a2320})); hut.position.set(Math.cos(a)*5,1.5,Math.sin(a)*5); grp.add(hut); const roof=new THREE.Mesh(new THREE.ConeGeometry(2.6,2,4), new THREE.MeshStandardMaterial({color:0x3a2c22})); roof.position.set(Math.cos(a)*5,4,Math.sin(a)*5); roof.rotation.y=0.78; grp.add(roof);} }
+  else if (id==='fields'){ for(let i=0;i<4;i++){const f=new THREE.Mesh(new THREE.BoxGeometry(3,0.4,7), new THREE.MeshStandardMaterial({color:0x3f6b2a})); f.position.set(-6+i*4,0.2,0); grp.add(f);} s.fieldGrp=grp; }
+  else if (id==='wall'){ for(let i=0;i<8;i++){const p=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,4), new THREE.MeshStandardMaterial({color:0x5b4636})); p.position.set(-7+i*2,2,0); grp.add(p);} }
+  else if (id==='ridge'){ s.fireGrp=new THREE.Group(); grp.add(s.fireGrp); }
+  else if (id==='shrine'){ const m=new THREE.Mesh(new THREE.BoxGeometry(3,7,3), new THREE.MeshStandardMaterial({color:0x2a2536,emissive:0x1a0a2a})); m.position.y=3.5; grp.add(m); s.monolith=m; }
+  // god-portrait billboard (sprite) hovering above the site
+  if (s.deity){
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.load('./avatars/'+s.deity+'.png'), transparent:true }));
+    spr.scale.set(10,10,1); spr.position.y = 16; grp.add(spr); billboards[id]=spr;
+    const glow = new THREE.PointLight(new THREE.Color(PANTHEON[s.deity].color==='amber'?0xf59e0b:PANTHEON[s.deity].color==='rose'?0xfb7185:PANTHEON[s.deity].color==='emerald'?0x34d399:0xa78bfa), 0.6, 40); glow.position.y=14; grp.add(glow); s.glow=glow;
+  }
+}
+
+// ---- avatar ----
+const hero = new THREE.Group();
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.3,2.4,4,8), new THREE.MeshStandardMaterial({color:0xc9b892})); body.position.y=2.4; hero.add(body);
+const head = new THREE.Mesh(new THREE.SphereGeometry(1.1,12,12), new THREE.MeshStandardMaterial({color:0xe7dcc4})); head.position.y=4.6; hero.add(head);
+hero.position.set(8,0,8); scene.add(hero);
+
+// ---- input ----
+const keys = new Set();
+addEventListener('keydown', e=>{ const k=e.key.toLowerCase();
+  if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){keys.add(k);e.preventDefault();}
+  if(k==='e') interact();
+  if(['1','2','3','4'].includes(k)){ if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
+  if(k==='r'&&w.over) restart();
+});
+addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
+
+function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
+async function interact(){ if(busy||w.over) return; const n=nearest(); if(!n) return; if(n.s.shrine){shrineMenu=true;return;} await doTurn(n.s.act); }
+async function chooseOffer(i){ shrineMenu=false; await doTurn({action:'offer', deity:DEITY_IDS[i]}); }
+async function doTurn(a){ busy=true; shrineMenu=false; const before=w.ledger.length; await stepTurn(w,a.action,a.deity,god);
+  if(w.ledger.length>before){ const e=w.ledger.at(-1); omen={text:e.omen,turn:e.turn}; pending={idx:w.ledger.length-1,actual:e.deity}; } else {omen=null;pending=null;} busy=false; }
+function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; reads.push({correct:guess===pending.actual}); pending={...pending,result:{guess,correct:guess===pending.actual}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
+function restart(){ w=newWorld(); reads=[]; omen=null; pending=null; }
+window.__acc=accuse; window.restart=restart;
+
+// ---- loop ----
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+  // move (world-relative)
+  if(!busy && !w.over){ let dx=0,dz=0;
+    if(keys.has('w')||keys.has('arrowup'))dz--; if(keys.has('s')||keys.has('arrowdown'))dz++;
+    if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
+    if(dx||dz){ const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); } }
+  hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
+  // camera follows (behind + above)
+  const camTarget = new THREE.Vector3(hero.position.x, 5, hero.position.z);
+  camera.position.lerp(new THREE.Vector3(hero.position.x, 30, hero.position.z+42), 0.08);
+  camera.lookAt(camTarget);
+  // tension → ember light + sky tint
+  const t=w.tension/100; ember.intensity=t*2.2; scene.fog.color.setRGB(0.047+t*0.25,0.04,0.035); scene.background=scene.fog.color;
+  // billboards glow by wrath; ridge fires; well colour
+  const anger=Object.fromEntries(ranking(w).map(r=>[r.deity,r.anger])); const maxA=Math.max(1,...Object.values(anger).map(Math.abs));
+  for(const [id,s] of Object.entries(SITES)){ if(s.glow){ s.glow.intensity=0.4+1.6*THREE.MathUtils.clamp(anger[s.deity]/maxA,0,1); } if(s.deity&&billboards[id]) billboards[id].position.y=16+Math.sin(clock.elapsedTime*1.5+id.length)*0.6; }
+  if(SITES.well.water) SITES.well.water.material.color.setHex(w.sites.well.clean?0x3b82c4:0x84812f);
+  // ridge fires ~ bandits
+  const fg=SITES.ridge.fireGrp; while(fg.children.length<w.bandits.strength){ const f=new THREE.Mesh(new THREE.ConeGeometry(0.8,2.4,6), new THREE.MeshStandardMaterial({color:0xf97316,emissive:0xf97316})); f.position.set(-8+fg.children.length*3,1.2,0); fg.add(f);} while(fg.children.length>w.bandits.strength) fg.remove(fg.children[fg.children.length-1]);
+  if(SITES.shrine.monolith) SITES.shrine.monolith.visible=!w.sites.shrine.desecrated;
+  renderer.render(scene, camera);
+  drawUI();
+}
+
+// ---- HUD (DOM) ----
+const ui=document.getElementById('ui');
+function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.correct).length;
+  ui.innerHTML=`
+   <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
+     <div class="flex gap-5 items-baseline">
+       <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· the vale in 3D</span></span>
+       <span class="mono text-xs">turn <span class="text-stone-200">${w.turn}</span>/${w.maxTurns}</span>
+       <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water} · morale ${v.morale}</span>
+       <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${w.tension}</span>
+       <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
+     </div>
+     <div class="flex gap-3 pointer-events-auto"><a href="./explore.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a><a href="./index.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">board ▸</a></div>
+   </div>
+   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
+   ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
+   ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">WASD / arrows to walk · approach a place and press E</div>`:''}
+   ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? 1–4</span>${DEITY_IDS.map((d,i)=>`<button onclick="window.__acc(${i})" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ it was '+PANTHEON[pending.actual].name.split(',')[0]}</p>`:''}</div></div>`:''}
+   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">${w.won?'The vale endures.':'The vale is empty.'}</p><p class="serif italic text-stone-400 mt-2">You read ${correct}/${reads.length} of their hands.</p><button onclick="window.restart()" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>`:''}`;
+}
+animate();
+</script>
+</body>
+</html>

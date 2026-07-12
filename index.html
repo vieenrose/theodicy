@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--
+  Root entry point for a Hugging Face **static Space** (sdk: static serves this
+  index.html at the Space root). The game itself lives, unchanged, in game/ so
+  there is a single source of truth; this splash hands off to it. Locally you can
+  still open game/index.html directly.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THEODICY — a valley under gods</title>
+<link rel="canonical" href="./game/index.html" />
+<meta http-equiv="refresh" content="0; url=./game/index.html" />
+<style>
+  html,body{height:100%;margin:0;background:#0c0a09;color:#a8a29e;
+    font-family:'EB Garamond',Georgia,serif;display:grid;place-items:center;text-align:center}
+  a{color:#a78bfa;text-decoration:none;border-bottom:1px solid #4c1d95;padding-bottom:1px}
+  .k{font-family:ui-monospace,monospace;font-size:11px;letter-spacing:.2em;color:#57534e;margin-top:1.5rem}
+  h1{font-size:2.5rem;letter-spacing:.15em;color:#f5f5f4;font-weight:400;margin:0}
+  p{font-style:italic;max-width:32ch}
+</style>
+</head>
+<body>
+  <div>
+    <h1>THEODICY</h1>
+    <p>Four minds act upon your valley. They will not tell you which, or why.</p>
+    <p class="k">entering the vale… if nothing happens, <a href="./game/index.html">step in →</a></p>
+  </div>
+  <script>location.replace('./game/index.html');</script>
+</body>
+</html>

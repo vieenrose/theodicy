@@ -24,12 +24,25 @@
 //
 // Run:  node test/eval_god.mjs [--games 200]
 
-import { newWorld, stepTurn, PLAYER_ACTIONS, PANTHEON, DEITY_IDS, legalBids, ranking } from '../game/engine.js';
+import { newWorld, stepTurn, PLAYER_ACTIONS, PANTHEON, DEITY_IDS, legalBids, ranking, digest } from '../game/engine.js';
 import { HeuristicGod } from '../game/gods.js';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 
-const GAMES = Number(process.argv.includes('--games')
-  ? process.argv[process.argv.indexOf('--games') + 1] : 200);
+const arg = (flag, def) => (process.argv.includes(flag) ? process.argv[process.argv.indexOf(flag) + 1] : def);
+const GAMES = Number(arg('--games', 200));
 const TEMP = 18.0; // MUST match label_heuristic() in make_dataset.py
+
+// --- paths to the trained-model scorer (the piece this file used to lack) ----
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CKPT = arg('--ckpt', join(ROOT, 'ckpt/supra-god'));
+const PYTHON = arg('--python', join(ROOT, '.venv/bin/python'));
+const WORKER = join(ROOT, 'test/score_worker.py');
+const HAVE_MODEL = !process.argv.includes('--no-model')
+  && existsSync(CKPT) && existsSync(PYTHON) && existsSync(WORKER);
 
 // --- the oracle's own distribution over deities, for a given world -----------
 function oracleDist(w) {
@@ -84,6 +97,85 @@ class OracleGod {
     const d = ds.reduce((x, y) => (a[x] >= a[y] ? x : y));
     const opts = legal.filter((b) => b.deity === d);
     return { ...opts[0], omen: '', reason: 'argmax' };
+  }
+}
+
+// --- the trained model, scored on the GPU by test/score_worker.py -----------
+// The browser scores bids in transformers.js/WebGPU (SupraGod.#scoreBids). Node
+// has neither, so we keep engine.js authoritative here and offload ONLY the
+// forward pass to a persistent Python worker holding the fine-tuned checkpoint.
+// One process, shared across every game; requests are serialised (the game loop
+// awaits each decide), so a FIFO queue matches replies to requests.
+class ModelScorer {
+  constructor(ckpt) {
+    this.proc = spawn(PYTHON, [WORKER, '--ckpt', ckpt], { stdio: ['pipe', 'pipe', 'inherit'] });
+    this.q = [];
+    createInterface({ input: this.proc.stdout }).on('line', (line) => {
+      const r = this.q.shift();
+      if (!r) return;
+      r.resolve(line === 'READY' ? 'READY' : JSON.parse(line).lps);
+    });
+    this.proc.on('exit', (code) => { for (const r of this.q) r.reject(new Error(`worker exited ${code}`)); this.q = []; });
+  }
+  #req(payload) {
+    return new Promise((resolve, reject) => { this.q.push({ resolve, reject }); this.proc.stdin.write(payload + '\n'); });
+  }
+  ready() { return this.#req('PING'); }
+  score(prompt, conts) { return this.#req(JSON.stringify({ prompt, conts })); }
+  close() { try { this.proc.stdin.end(); this.proc.kill(); } catch {} }
+}
+
+// Mirror SupraGod.#prompt(w) from game/gods.js byte-for-byte: we are evaluating
+// the DEPLOYED policy, so it must see exactly the prompt the browser feeds it.
+function supraPrompt(w) {
+  const led = w.ledger.slice(-4).map((e) => `t${e.turn} ${e.deity} ${e.verb} :: ${e.reason}`).join('\n') || 'the ledger is empty';
+  return [
+    'You are the pantheon over a small valley. You perceive only this:',
+    digest(w), '',
+    'The ledger of what you have already done (your past binds you):',
+    led, '',
+    'The next act is:', '',
+  ].join('\n');
+}
+
+// Two model backends, sharing one scorer:
+//   deployed  — the exact shipped blend (lp + 1.6·anger-prior) + softmax sample.
+//               This is what a player actually gets.
+//   argmax    — pure model, no anger prior, argmax over lp. Isolates what the
+//               MODEL alone learned, directly comparable to Oracle (argmax anger).
+//               If THIS collapses onto the oracle, the weights are a lookup table
+//               no matter how the deployed blend flatters the numbers.
+class SupraGodEval {
+  constructor(scorer, seed, { blend, argmax }) {
+    this.scorer = scorer; this.blend = blend; this.argmax = argmax;
+    this.name = argmax ? 'Supra-50M (argmax lp)' : 'Supra-50M (deployed)';
+    this.s = (seed >>> 0) || 1;
+  }
+  rnd() { // mulberry32, mirrors gods.js
+    this.s = (this.s + 0x6D2B79F5) | 0;
+    let t = Math.imul(this.s ^ (this.s >>> 15), 1 | this.s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  async decide(w, legal) {
+    const lps = await this.scorer.score(supraPrompt(w), legal.map((b) => `${b.deity}:${b.verb}`));
+    const anger = Object.fromEntries(ranking(w).map((r) => [r.deity, r.anger]));
+    const maxAnger = Math.max(1, ...Object.values(anger).map(Math.abs));
+    const util = legal.map((b, i) => ({
+      b, lp: lps[i], u: lps[i] + (this.blend ? (anger[b.deity] / maxAnger) * this.blend : 0),
+    }));
+    let idx;
+    if (this.argmax) {
+      idx = util.reduce((best, x, i) => (x.u > util[best].u ? i : best), 0);
+    } else {
+      const T = 0.7, mx = Math.max(...util.map((x) => x.u));
+      const exps = util.map((x) => Math.exp((x.u - mx) / T));
+      const tot = exps.reduce((a, c) => a + c, 0);
+      let r = this.rnd() * tot; idx = exps.length - 1;
+      for (let i = 0; i < exps.length; i++) { r -= exps[i]; if (r <= 0) { idx = i; break; } }
+    }
+    const c = util[idx];
+    return { ...c.b, target: null, reason: `lp ${c.lp.toFixed(2)} · anger ${anger[c.b.deity].toFixed(0)}`, omen: '' };
   }
 }
 
@@ -162,9 +254,25 @@ results.push(await evaluate(() => new OracleGod(),        'Oracle (argmax)'));
 results.push(await evaluate((s) => new HeuristicGod(s),   'Heuristic (baseline)'));
 results.push(await evaluate((s) => new RandomGod(s),      'Random (control)'));
 
-// To evaluate the trained model, run this in a browser (SupraGod needs WebGPU),
-// or port the scoring pass to onnxruntime-node and add it here:
-//   results.push(await evaluate(() => supra, 'Supra-50M (trained)'));
+// The trained model — the backend this file used to have a TODO for. Scored on
+// the GPU by test/score_worker.py, so no browser/WebGPU needed. Two views:
+// what the model alone prefers (argmax lp) and what actually ships (blended).
+let deployed = null, argmaxed = null;
+if (HAVE_MODEL) {
+  console.log(`\nloading trained checkpoint on GPU (${CKPT}) …`);
+  const scorer = new ModelScorer(CKPT);
+  try {
+    await scorer.ready();  // block until the checkpoint is resident on the GPU
+    argmaxed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: 0,   argmax: true  }), 'Supra-50M (argmax lp)');
+    deployed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: 1.6, argmax: false }), 'Supra-50M (deployed)');
+    results.push(argmaxed, deployed);
+  } finally {
+    scorer.close();
+  }
+} else {
+  console.log('\n[no trained checkpoint found — showing reference backends only.'
+    + '\n run the training runbook, or pass --ckpt <dir> --python <venv-python>, to score the model.]');
+}
 
 results.forEach(report);
 
@@ -212,3 +320,40 @@ from something with opinions instead of arithmetic.
 
 Do not try to make the model smarter. Make it stranger, but bounded.
 `);
+
+// ---------------------------------------------------------------------------
+// COMPUTED VERDICT — apply the rules above to the actual trained model.
+// ---------------------------------------------------------------------------
+function maxShare(r) { return Math.max(...DEITY_IDS.map((d) => r.pMarg[d])); }
+function topDeity(r) { return DEITY_IDS.reduce((a, b) => (r.pMarg[a] >= r.pMarg[b] ? a : b)); }
+
+function verdict(r) {
+  const share = maxShare(r), floor = heur.KL;
+  if (r.H < 0.4)                    return ['BROKEN',    `always ${PANTHEON[topDeity(r)].name.split(',')[0]} — H=${r.H.toFixed(2)} < 0.4`];
+  if (share > 0.60)                 return ['COLLAPSED', `${PANTHEON[topDeity(r)].name.split(',')[0]} ${(share*100)|0}% of acts — learned who's angriest on average, stopped reading`];
+  if (r.MI < rand.MI + 0.05)        return ['COLLAPSED', `MI=${r.MI.toFixed(2)} ~ random (${rand.MI.toFixed(2)}) — not reading the valley`];
+  if (r.KL <= floor + 0.05)         return ['REDUNDANT', `KL=${r.KL.toFixed(2)} ~ heuristic floor (${floor.toFixed(2)}) — it IS the oracle. Delete it.`];
+  return ['THE GOD', `KL=${r.KL.toFixed(2)} vs floor ${floor.toFixed(2)} (+${(r.KL-floor).toFixed(2)}) with MI=${r.MI.toFixed(2)} healthy — reads the valley, then disagrees. The disagreement is the product.`];
+}
+
+if (HAVE_MODEL && deployed && argmaxed) {
+  console.log(`${'═'.repeat(58)}`);
+  console.log('COMPUTED VERDICT (this run)');
+  console.log(`${'═'.repeat(58)}\n`);
+  const row = (label, r) => {
+    const [tag, why] = verdict(r);
+    console.log(`  ${label.padEnd(22)} KL ${r.KL.toFixed(2)}  MI ${r.MI.toFixed(2)}  H ${r.H.toFixed(2)}  top ${(maxShare(r)*100|0)}%`);
+    console.log(`  ${' '.repeat(22)} → ${tag}: ${why}\n`);
+  };
+  console.log(`  reference floor (Heuristic):  KL ${heur.KL.toFixed(2)}  MI ${heur.MI.toFixed(2)}  H ${heur.H.toFixed(2)}\n`);
+  row('Supra-50M argmax lp', argmaxed);
+  row('Supra-50M deployed', deployed);
+
+  const [tag] = verdict(argmaxed);
+  console.log(`${'─'.repeat(58)}`);
+  console.log(tag === 'THE GOD'
+    ? '  HEADLINE: the model alone (no anger blend) already diverges from the\n'
+      + '  oracle while still tracking the world. It earns its 50M parameters.'
+    : `  HEADLINE: model-alone verdict is ${tag}. Read the rules above before shipping.`);
+  console.log(`${'─'.repeat(58)}`);
+}

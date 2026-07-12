@@ -16,6 +16,8 @@
 
 import { PANTHEON, VERBS, digest, ranking } from './engine.js';
 
+// LiveLLMGod is defined at the bottom of this file.
+
 // ---------------------------------------------------------------------------
 // Omen templates (used by HeuristicGod, and as fallback when the model errors)
 // ---------------------------------------------------------------------------
@@ -149,33 +151,33 @@ export class SupraGod {
   async decide(w, legal) {
     if (!this.ready) return this.fallback.decide(w, legal);
     try {
-      const scored = await this.#scoreBids(w, legal);
-
-      // Blend the model's preference with the arbiter's anger prior. The prior
-      // keeps the world coherent; the model supplies the caprice. Pure model =
-      // noise. Pure prior = a state machine. The mix is the god.
-      const anger = Object.fromEntries(ranking(w).map((r) => [r.deity, r.anger]));
-      const maxAnger = Math.max(1, ...Object.values(anger).map(Math.abs));
-      const util = scored.map((s) => ({
-        ...s,
-        u: s.lp * 1.0 + (anger[s.bid.deity] / maxAnger) * 1.6,
-      }));
-
-      const T = 0.7;
-      const mx = Math.max(...util.map((u) => u.u));
-      const exps = util.map((u) => Math.exp((u.u - mx) / T));
-      const tot = exps.reduce((a, b) => a + b, 0);
-      let r = Math.random() * tot, idx = 0;
-      for (let i = 0; i < exps.length; i++) { r -= exps[i]; if (r <= 0) { idx = i; break; } }
-      const chosen = util[idx].bid;
-
+      // The model was fine-tuned to emit "<deity>:<verb>". So we GENERATE its bid
+      // and validate it against the legal menu — robust, and it's the format the
+      // model actually knows. (The old log-likelihood scorer was never browser-
+      // tested and threw.) Off-menu output falls to an anger-weighted legal pick,
+      // so the god is always capricious-but-lawful.
+      const prompt = this.#prompt(w);
+      const inputs = await this.tok(prompt);
+      const out = await this.model.generate({
+        ...inputs, max_new_tokens: 8, do_sample: true, temperature: 1.0,
+        top_p: 0.95, repetition_penalty: 1.1,
+      });
+      const full = this.tok.batch_decode(out, { skip_special_tokens: true })[0];
+      const tail = full.slice(prompt.length);
+      const m = tail.match(/([a-z]+)\s*:\s*([a-z]+)/i);
+      let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
+      let src = 'supra';
+      if (!chosen) {                                   // off-menu → anger-weighted legal pick
+        const rank = ranking(w).filter((r) => legal.some((b) => b.deity === r.deity));
+        const pick = (Math.random() < 0.75 ? rank[0] : (rank[1] || rank[0]));
+        const opts = legal.filter((b) => b.deity === pick.deity);
+        chosen = opts[Math.floor(Math.random() * opts.length)];
+        src = 'prior';
+      }
       const omen = await this.#omen(w, chosen);
       return {
-        deity: chosen.deity,
-        verb: chosen.verb,
-        target: null,
-        reason: `lp ${util[idx].lp.toFixed(2)} · anger ${anger[chosen.deity].toFixed(0)}`,
-        omen,
+        deity: chosen.deity, verb: chosen.verb, target: null,
+        reason: `${src}${m ? ' ' + m[1] + ':' + m[2] : ''}`, omen,
       };
     } catch (e) {
       console.warn('SupraGod failed, falling back:', e);
@@ -188,7 +190,7 @@ export class SupraGod {
   async #omen(w, bid) {
     try {
       const p = `${PANTHEON[bid.deity].name}, ${PANTHEON[bid.deity].epithet}, acts upon the valley: ${bid.verb}.\nThe sign given to the people, in one sentence, is:`;
-      const ids = this.tok(p, { return_tensor: true });
+      const ids = await this.tok(p);
       const out = await this.model.generate({
         ...ids,
         max_new_tokens: 28,
@@ -205,6 +207,58 @@ export class SupraGod {
       return text;
     } catch {
       return pick(OMENS[bid.verb], Math.random);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BACKEND C — LiveLLMGod (ConicCat/Qwen3.5-0.8B-Text-Only, via game/god_server.py)
+//
+// Runs a real 0.8B LLM AS the god, live. It is world-blind (measured), but the
+// arbiter guarantees legality and the action space guarantees character, so a
+// capricious-but-lawful god is exactly the thesis — we just want its strange voice.
+//
+// Needs the local server running (it can't run on a static HF Space):
+//     .venv-teacher/bin/python game/god_server.py --port 8008
+// If the server is absent/unreachable, it falls back to HeuristicGod, so the game
+// stays playable everywhere (including the deployed static Space).
+// ---------------------------------------------------------------------------
+export class LiveLLMGod {
+  constructor(url = 'http://localhost:8008', opts = {}) {
+    this.url = url;
+    this.name = 'Qwen3.5-0.8B';
+    this.ready = false;
+    this.fallback = new HeuristicGod(opts.seed ?? 9);
+  }
+
+  async load() {
+    try {
+      const r = await fetch(this.url + '/', { method: 'GET' });
+      this.ready = r.ok;
+    } catch {
+      this.ready = false;
+      throw new Error('god_server not reachable at ' + this.url);
+    }
+  }
+
+  async decide(w, legal) {
+    if (!this.ready) return this.fallback.decide(w, legal);
+    try {
+      const r = await fetch(this.url + '/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ digest: digest(w), legal: legal.map((b) => ({ deity: b.deity, verb: b.verb })) }),
+      });
+      const j = await r.json();
+      const hit = legal.find((b) => b.deity === j.deity && b.verb === j.verb);
+      if (!hit) return this.fallback.decide(w, legal);      // arbiter would reject anyway
+      return {
+        deity: hit.deity, verb: hit.verb, target: null,
+        reason: j.reason || 'qwen3.5-0.8b',
+        omen: j.omen || pick(OMENS[hit.verb], Math.random),
+      };
+    } catch {
+      return this.fallback.decide(w, legal);
     }
   }
 }

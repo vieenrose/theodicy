@@ -22,20 +22,74 @@ import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0'
 import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { newWorld, stepTurn, PLAYER_ACTIONS, PANTHEON, DEITY_IDS, ranking } from './engine.js';
-import { HeuristicGod, SupraGod } from './gods.js';
+import { HeuristicGod, SupraGod, LiveLLMGod } from './gods.js';
+import { valleyMapMarkup, sigilPath, portraitMarkup } from './scene.js';
+import { LANGS, DEITY_I18N, ACTION_I18N, EVENT_I18N, OMEN_I18N, localizeLog, t } from './i18n.js';
 
 const html = htm.bind(React.createElement);
 
 const TONE = { amber:'text-amber-400', rose:'text-rose-400', emerald:'text-emerald-400', violet:'text-violet-400' };
 const BG   = { amber:'bg-amber-950/40 border-amber-900/60', rose:'bg-rose-950/40 border-rose-900/60',
                emerald:'bg-emerald-950/40 border-emerald-900/60', violet:'bg-violet-950/40 border-violet-900/60' };
+const RING = { amber:'ring-amber-500/60', rose:'ring-rose-500/60', emerald:'ring-emerald-500/60', violet:'ring-violet-500/60' };
 
-function Stat({ label, value, max = 20, danger }) {
+// which gods a player action pleases (+) or angers (−) — mirrors applyPlayerAction in engine.js
+const AFFINITY = {
+  tend_well: { vurm: 1 },
+  pay_debt:  { ithra: 1 },
+  desecrate: { vurm: -1, kel: -1, oss: -1, ithra: -1 },
+};
+
+// ambient turn-events: variety + stakes, applied at the start of a turn (UI layer, so
+// the arbiter/invariants stay untouched). cond gates them to sensible situations.
+const EVENTS = [
+  { text: 'A caravan passes and trades fairly.',        eff: (v) => { v.food += 3; v.morale += 3; } },
+  { text: 'Rats are found in the granary.',             eff: (v) => { v.food = Math.max(0, v.food - 3); } },
+  { text: 'A dry wind comes down off the ridge.',       eff: (v) => { v.water = Math.max(0, v.water - 2); } },
+  { text: 'A child is born in the night.',              eff: (v) => { v.pop += 1; v.morale += 4; }, cond: (w) => w.village.food > 5 },
+  { text: 'Old wounds fester; one does not wake.',      eff: (v) => { v.pop = Math.max(0, v.pop - 1); v.morale -= 5; }, cond: (w) => w.village.morale < 30 },
+  { text: 'Strangers are counted at the treeline.',     eff: (v, w) => { w.bandits.strength += 1; w.tension = Math.min(100, w.tension + 8); } },
+  { text: 'A clear night; the valley sleeps easy.',     eff: (v) => { v.morale += 6; } },
+  { text: 'Someone leaves bread at the shrine.',        eff: (v, w) => { v.food += 2; w.sites.shrine.tended += 1; } },
+];
+
+// a deity's face: the painted portrait (avatars/<god>.png), falling back to the
+// self-contained SVG portrait medallion if the image is ever missing.
+function Face({ deity, size = 40, ring = true, dim = false }) {
+  const [png, setPng] = useState(true);
+  const d = PANTHEON[deity];
+  return html`
+    <div class=${'relative rounded-full overflow-hidden shrink-0 bg-black ' + (ring ? 'ring-1 ' + RING[d.color] : '') + (dim ? ' opacity-40' : '')}
+         style=${{ width: size + 'px', height: size + 'px' }} title=${d.name}>
+      ${png ? html`<img src=${'./avatars/' + deity + '.png'} onError=${() => setPng(false)} class="w-full h-full object-cover" alt=${d.name} />`
+            : html`<div class="w-full h-full" dangerouslySetInnerHTML=${{ __html: portraitMarkup(deity) }}></div>`}
+    </div>`;
+}
+
+// an omen's illustration — one scene per divine verb; silently absent if missing.
+function OmenPic({ verb, className }) {
+  const [ok, setOk] = useState(true);
+  if (!verb || !ok) return null;
+  return html`<img src=${'./omens/' + verb + '.png'} onError=${() => setOk(false)}
+    class=${'object-cover rounded ' + (className || '')} alt="omen" loading="lazy" />`;
+}
+
+function theodicyRank(f) {
+  if (f >= 0.85) return 'You knew their hands as your own. A true theodicy.';
+  if (f >= 0.6)  return 'You caught the shape of them, more often than not.';
+  if (f >= 0.35) return 'You saw them in glimpses, and guessed the rest.';
+  return 'You suffered them without ever knowing them.';
+}
+
+function Stat({ label, value, max = 20, danger, proj }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
+  const showProj = proj !== undefined && proj !== value;
+  const projBad = proj !== undefined && proj <= 0;
   return html`
     <div>
       <div class="flex justify-between text-[10px] uppercase tracking-widest text-stone-500 mono">
-        <span>${label}</span><span class=${danger ? 'text-rose-400' : 'text-stone-300'}>${value}</span>
+        <span>${label}</span>
+        <span class=${danger ? 'text-rose-400' : 'text-stone-300'}>${value}${showProj ? html`<span class=${'ml-1 ' + (projBad ? 'text-rose-500' : 'text-stone-600')}>→ ${proj}</span>` : ''}</span>
       </div>
       <div class="h-1 bg-stone-800 mt-1 rounded-full overflow-hidden">
         <div class=${'h-full rounded-full ' + (danger ? 'bg-rose-600' : 'bg-stone-500')} style=${{ width: pct + '%' }}></div>
@@ -50,19 +104,53 @@ function App() {
   const [loading, setLoading] = useState(null);
   const [thinking, setThinking] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
-  const [modelId, setModelId] = useState('onnx-community/Supra-50M-Base-ONNX');
+  const [modelId, setModelId] = useState('Luigi/supra-god-onnx');
+  const [reads, setReads] = useState([]);        // {idx, guess, actual, correct}
+  const [accused, setAccused] = useState(() => new Set());
+  const [showIntro, setShowIntro] = useState(true);
+  const [lang, setLang] = useState('en');
   const feedRef = useRef(null);
+  const T = (k, v) => t(lang, k, v);
+  const gName = (d) => (DEITY_I18N[lang] || DEITY_I18N.en)[d][0];
+  const gDom = (d) => (DEITY_I18N[lang] || DEITY_I18N.en)[d][1];
+  const aLabel = (k) => (ACTION_I18N[lang] || ACTION_I18N.en)[k][0];
+  const aHint = (k) => (ACTION_I18N[lang] || ACTION_I18N.en)[k][1];
+  const omenText = (o) => (lang === 'en' || !o.verb) ? o.text : ((OMEN_I18N[lang] || {})[o.verb] || o.text);
+  const evEnIdx = Object.fromEntries(EVENT_I18N.en.map((s, i) => [s, i]));
+  const locLine = (text) => lang === 'en' ? text : (text in evEnIdx ? (EVENT_I18N[lang][evEnIdx[text]] || text) : localizeLog(lang, text));
 
   useEffect(() => { feedRef.current?.scrollTo(0, 1e9); }, [w.omens.length, w.log.length]);
+
+  function restart() {
+    setW(newWorld()); setReads([]); setAccused(new Set()); setShowLedger(false);
+  }
 
   async function act(action, deityArg) {
     if (w.over || thinking) return;
     setThinking(true);
     const next = structuredClone(w);
+    // ambient event (variety + stakes) — UI layer, engine truth untouched
+    if (next.turn > 1 && Math.random() < 0.32) {
+      const pool = EVENTS.filter((e) => !e.cond || e.cond(next));
+      const e = pool[Math.floor(Math.random() * pool.length)];
+      if (e) { e.eff(next.village, next); next.log.push(e.text); }
+    }
     await stepTurn(next, action, deityArg, god);
     setW(next);
     setThinking(false);
   }
+
+  // accuse a god of the latest divine act — the inference made mechanical
+  function accuse(idx, guess) {
+    if (accused.has(idx)) return;
+    const actual = w.ledger[idx].deity;
+    setReads((r) => [...r, { idx, guess, actual, correct: guess === actual }]);
+    setAccused((s) => new Set(s).add(idx));
+  }
+  const pendingIdx = w.ledger.length - 1;
+  const pending = w.ledger.length && !accused.has(pendingIdx) ? w.ledger[pendingIdx] : null;
+  const lastRead = reads.find((r) => r.idx === pendingIdx);
+  const correctReads = reads.filter((r) => r.correct).length;
 
   async function enableSupra() {
     const g = new SupraGod(modelId, { dtype: 'q4', device: 'webgpu' });
@@ -78,26 +166,89 @@ function App() {
     }
   }
 
+  async function enableLive() {
+    const g = new LiveLLMGod('http://localhost:8008');
+    setLoading({ pct: 0, msg: 'reaching for the 0.8B on :8008…' });
+    try {
+      await g.load();
+      setGod(g); setBackend('live'); setLoading(null);
+    } catch (e) {
+      setLoading({ pct: 0, msg: 'no god_server on :8008 — run game/god_server.py locally. staying on heuristic.', err: true });
+      setTimeout(() => setLoading(null), 7000);
+    }
+  }
+
   const v = w.village;
   const rank = ranking(w);
-  const feed = [...w.omens.map(o => ({ ...o, kind: 'omen' })), ...w.log.map((t, i) => ({ turn: '', text: t, kind: 'log', i }))];
+  const feed = [...w.omens.map((o, i) => ({ ...o, verb: w.ledger[i]?.verb, kind: 'omen' })), ...w.log.map((t, i) => ({ turn: '', text: t, kind: 'log', i }))];
+  const upkeepFood = Math.ceil(v.pop / 4);       // engine upkeep: food −ceil(pop/4), water −1 per turn
+  const projFood = Math.max(0, v.food - upkeepFood);
+  const projWater = Math.max(0, v.water - 1);
+  const starving = projFood <= 0, thirsting = projWater <= 0;
 
   return html`
   <div class="min-h-screen vignette">
+    ${showIntro && html`
+      <div class="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm grid place-items-center p-6" onClick=${() => setShowIntro(false)}>
+        <div class="max-w-lg border border-stone-800 rounded-lg bg-stone-950 p-6" onClick=${(e) => e.stopPropagation()}>
+          <h2 class="serif text-3xl text-stone-100 tracking-wide">THEODICY</h2>
+          <p class="serif italic text-stone-500 text-sm mt-1">${T('introSub')}</p>
+          <div class="mt-4 space-y-3 serif text-stone-300 text-[15px] leading-relaxed">
+            <p dangerouslySetInnerHTML=${{ __html: T('introP1') }}></p>
+            <p dangerouslySetInnerHTML=${{ __html: T('introP2') }}></p>
+            <p class="text-stone-500 text-sm" dangerouslySetInnerHTML=${{ __html: T('introP3') }}></p>
+          </div>
+          <button onClick=${() => setShowIntro(false)} class="mt-5 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${T('introEnter')}</button>
+        </div>
+      </div>`}
     <div class="max-w-6xl mx-auto p-6">
 
       <header class="flex items-end justify-between border-b border-stone-800 pb-4 mb-6">
         <div>
           <h1 class="serif text-4xl text-stone-100 tracking-wide">THEODICY</h1>
-          <p class="serif italic text-stone-500 text-sm mt-1">
-            Four minds act upon your valley. They will not tell you which, or why.
-          </p>
+          <p class="serif italic text-stone-500 text-sm mt-1">${T('tagline')}</p>
         </div>
         <div class="text-right mono text-xs">
-          <div class="text-stone-500">TURN <span class="text-stone-200">${w.turn}</span> / ${w.maxTurns}</div>
-          <div class="mt-1 text-stone-600">god: <span class=${backend === 'supra' ? 'text-violet-400' : 'text-stone-400'}>${god.name}</span></div>
+          <div class="flex gap-1 justify-end mb-1">
+            ${Object.entries(LANGS).map(([code, lbl]) => html`
+              <button key=${code} onClick=${() => setLang(code)}
+                class=${'px-1.5 py-0.5 rounded text-[10px] ' + (lang === code ? 'bg-stone-700 text-stone-100' : 'text-stone-600 hover:text-stone-300')}>${lbl}</button>`)}
+          </div>
+          <div class="text-stone-500">${T('turn')} <span class="text-stone-200">${w.turn}</span> / ${w.maxTurns}</div>
+          <div class="mt-1 text-stone-600">${T('god')}: <span class=${backend === 'supra' ? 'text-violet-400' : backend === 'live' ? 'text-sky-400' : 'text-stone-400'}>${god.name}</span></div>
+          <div class="mt-1 text-stone-600">${T('theodicy')}: <span class="text-amber-300">${correctReads}</span><span class="text-stone-700">/${reads.length} ${T('read')}</span></div>
+          <a href="./world3d.html" class="inline-block mt-1 text-stone-600 hover:text-sky-400 border-b border-stone-800">walk the vale ▸ (3D)</a>
+          <a href="./explore.html" class="inline-block mt-1 ml-2 text-stone-600 hover:text-emerald-400 border-b border-stone-800">(2D)</a>
+          <a href="./rts.html" class="inline-block mt-1 ml-2 text-stone-600 hover:text-rose-400 border-b border-stone-800">${T('rts')}</a>
         </div>
       </header>
+
+      <!-- ============ THE MAP — the valley, drawn ============ -->
+      <div class="border border-stone-800 rounded-lg overflow-hidden mb-6 bg-black/40 relative">
+        <div dangerouslySetInnerHTML=${{ __html: valleyMapMarkup(w, lang) }}></div>
+        ${w.omens.length > 0 && html`
+          <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-6 pt-12 pb-4">
+            <div class="flex items-end gap-4">
+            <${OmenPic} verb=${w.ledger.at(-1)?.verb} className="w-32 h-24 shrink-0 ring-1 ring-stone-700 hidden sm:block" />
+            <div class="flex-1">
+            <p class="serif italic text-stone-100 text-lg leading-snug max-w-2xl">“${w.omens.at(-1).text}”</p>
+            <div class="flex items-center gap-2.5 mt-2 flex-wrap">
+              <span class="mono text-[9px] uppercase tracking-widest text-stone-500">sign · turn ${w.omens.at(-1).turn}</span>
+              ${pending ? html`
+                <span class="mono text-[9px] uppercase tracking-widest text-amber-300/80">· whose hand?</span>
+                ${DEITY_IDS.map((d) => html`
+                  <button key=${d} onClick=${() => accuse(pendingIdx, d)} title=${'accuse ' + PANTHEON[d].name}
+                    class="hover:scale-110 transition-transform"><${Face} deity=${d} size=${30} /></button>`)}
+              ` : lastRead ? html`
+                <${Face} deity=${lastRead.actual} size=${26} />
+                <span class=${'mono text-[9px] uppercase tracking-widest ' + (lastRead.correct ? 'text-emerald-400' : 'text-rose-400')}>
+                  ${lastRead.correct ? '✓ you knew the hand' : '✗ you named ' + PANTHEON[lastRead.guess].name.split(',')[0]} — it was ${PANTHEON[lastRead.actual].name.split(',')[0]}
+                </span>` : ''}
+            </div>
+            </div>
+            </div>
+          </div>`}
+      </div>
 
       <div class="grid grid-cols-12 gap-6">
 
@@ -107,11 +258,16 @@ function App() {
             <h2 class="mono text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-3">The Valley</h2>
             <div class="space-y-3">
               <${Stat} label="Souls"   value=${v.pop}     max=${20} danger=${v.pop <= 4} />
-              <${Stat} label="Food"    value=${v.food}    max=${20} danger=${v.food <= 2} />
-              <${Stat} label="Water"   value=${v.water}   max=${15} danger=${v.water <= 2} />
+              <${Stat} label="Food"    value=${v.food}    max=${20} danger=${v.food <= 2} proj=${projFood} />
+              <${Stat} label="Water"   value=${v.water}   max=${15} danger=${v.water <= 2} proj=${projWater} />
               <${Stat} label="Morale"  value=${v.morale}  max=${100} danger=${v.morale <= 25} />
               <${Stat} label="Defense" value=${v.defense} max=${10} />
             </div>
+            ${!w.over && (thirsting || starving) && html`
+              <p class="mt-3 mono text-[9px] leading-relaxed text-rose-400">
+                ${thirsting ? 'water runs out next turn — Tend the Well. ' : ''}${starving ? 'not enough to eat next turn — Harvest.' : ''}
+              </p>`}
+            <p class="mt-2 mono text-[9px] text-stone-600">each turn: −${upkeepFood} food, −1 water (upkeep)</p>
             <div class="mt-4 pt-3 border-t border-stone-800 space-y-2 mono text-[11px]">
               <div class="flex justify-between"><span class="text-stone-600">tension</span>
                 <span class=${w.tension > 65 ? 'text-rose-400' : 'text-stone-400'}>${w.tension}</span></div>
@@ -133,17 +289,27 @@ function App() {
               <input class="w-full mono text-[10px] bg-stone-900 border border-stone-800 rounded px-2 py-1.5 mb-2 text-stone-400"
                      value=${modelId} onChange=${(e) => setModelId(e.target.value)} />
               <button onClick=${enableSupra} disabled=${!!loading}
-                class="w-full mono text-[11px] px-3 py-2 rounded border border-violet-900 bg-violet-950/40 text-violet-300 hover:bg-violet-900/40 disabled:opacity-40">
-                ${loading ? `loading ${loading.pct}%` : 'summon Supra-50M ▸'}
+                class="w-full mono text-[11px] px-3 py-2 rounded border border-violet-900 bg-violet-950/40 text-violet-300 hover:bg-violet-900/40 disabled:opacity-40 mb-1.5">
+                ${loading ? `loading ${loading.pct}%` : 'summon Supra-50M ▸ (webgpu)'}
+              </button>
+              <button onClick=${enableLive} disabled=${!!loading}
+                class="w-full mono text-[11px] px-3 py-2 rounded border border-sky-900 bg-sky-950/40 text-sky-300 hover:bg-sky-900/40 disabled:opacity-40">
+                summon Qwen3.5-0.8B ▸ (local)
               </button>
               ${loading && html`<p class=${'mt-2 mono text-[9px] leading-relaxed ' + (loading.err ? 'text-rose-400' : 'text-stone-600')}>${loading.msg}</p>`}
               <p class="mt-2 serif italic text-[11px] text-stone-600 leading-snug">
-                Heuristic god is playing. It is competent and boring. The model is neither.
+                Heuristic god is playing — competent, boring, always here. Summon a model for something stranger.
               </p>
-            ` : html`
+            ` : backend === 'supra' ? html`
               <p class="mono text-[11px] text-violet-300">Supra-50M · q4 · webgpu</p>
               <p class="mt-2 serif italic text-[11px] text-stone-600 leading-snug">
                 It scores the legal menu and samples. It cannot act illegally. It can only be strange.
+              </p>
+            ` : html`
+              <p class="mono text-[11px] text-sky-300">Qwen3.5-0.8B · live · localhost:8008</p>
+              <p class="mt-2 serif italic text-[11px] text-stone-600 leading-snug">
+                A real 0.8B LLM on the throne. World-blind, but the arbiter keeps it lawful.
+                Capricious and lawful is what a god is.
               </p>
             `}
           </div>
@@ -168,9 +334,12 @@ function App() {
                 </p>`}
 
               ${feed.map((f, i) => f.kind === 'omen' ? html`
-                <div key=${'o' + i} class="border-l-2 border-stone-700 pl-4 py-1">
-                  <div class="mono text-[9px] text-stone-600 uppercase tracking-widest">omen · turn ${f.turn}</div>
-                  <p class="serif text-lg text-stone-200 italic leading-snug mt-0.5">${f.text}</p>
+                <div key=${'o' + i} class="flex gap-3 border-l-2 border-stone-700 pl-4 py-1">
+                  ${f.verb && html`<${OmenPic} verb=${f.verb} className="w-24 h-16 shrink-0 mt-1 opacity-90 ring-1 ring-stone-800" />`}
+                  <div>
+                    <div class="mono text-[9px] text-stone-600 uppercase tracking-widest">omen · turn ${f.turn}</div>
+                    <p class="serif text-lg text-stone-200 italic leading-snug mt-0.5">${f.text}</p>
+                  </div>
                 </div>
               ` : html`
                 <p key=${'l' + i} class="serif text-sm text-stone-500 leading-snug">${f.text}</p>
@@ -180,13 +349,21 @@ function App() {
 
               ${w.over && html`
                 <div class=${'mt-4 p-4 rounded border ' + (w.won ? 'border-emerald-900 bg-emerald-950/30' : 'border-rose-900 bg-rose-950/30')}>
-                  <p class="serif text-2xl ${w.won ? 'text-emerald-300' : 'text-rose-300'}">
+                  <p class=${'serif text-2xl ' + (w.won ? 'text-emerald-300' : 'text-rose-300')}>
                     ${w.won ? 'The valley endures.' : 'The valley is empty.'}
                   </p>
                   <p class="serif italic text-sm text-stone-400 mt-1">
-                    ${w.won ? 'You never learned which of them spared you.' : 'You never learned which of them did it.'}
+                    ${w.won ? 'It held for thirty turns.' : 'The last soul is gone.'}
                   </p>
-                  <button onClick=${() => { setW(newWorld()); setShowLedger(true); }}
+                  <div class="mt-3 pt-3 border-t border-stone-800/60">
+                    <p class="mono text-[9px] uppercase tracking-widest text-stone-500">theodicy score — how well you read the gods</p>
+                    ${reads.length ? html`
+                      <p class="serif text-xl text-amber-200 mt-1">${correctReads} / ${reads.length} hands read
+                        <span class="text-stone-500 text-sm">(${Math.round(100 * correctReads / reads.length)}%)</span></p>
+                      <p class="serif italic text-sm text-stone-400 mt-0.5">${theodicyRank(correctReads / reads.length)}</p>
+                    ` : html`<p class="serif italic text-sm text-stone-500 mt-1">You never once named a hand. The gods stayed strangers.</p>`}
+                  </div>
+                  <button onClick=${restart}
                     class="mt-3 mono text-[11px] px-3 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">
                     begin again ▸
                   </button>
@@ -224,6 +401,10 @@ function App() {
                       : 'border-stone-800 bg-stone-900/40 hover:bg-stone-800/60')}>
                   <div class=${'serif text-sm ' + (k === 'desecrate' ? 'text-rose-300' : 'text-stone-200')}>${a.label}</div>
                   <div class="mono text-[9px] text-stone-600 mt-0.5">${a.hint}</div>
+                  ${AFFINITY[k] && html`<div class="flex gap-1.5 mt-1">
+                    ${Object.entries(AFFINITY[k]).map(([d, s]) => html`
+                      <span key=${d} class=${'mono text-[8px] ' + (s > 0 ? 'text-emerald-400' : 'text-rose-400')}>${s > 0 ? '+' : '−'}${PANTHEON[d].name.split(',')[0]}</span>`)}
+                  </div>`}
                 </button>`)}
             </div>
           </div>
@@ -236,17 +417,21 @@ function App() {
             <div class="grid grid-cols-2 gap-1.5">
               ${DEITY_IDS.map((d) => html`
                 <button key=${d} onClick=${() => act('offer', d)} disabled=${w.over || thinking}
-                  class=${'px-2 py-2 rounded border text-left disabled:opacity-30 hover:brightness-125 ' + BG[PANTHEON[d].color]}>
-                  <div class=${'serif text-xs ' + TONE[PANTHEON[d].color]}>${PANTHEON[d].name.split(',')[0]}</div>
-                  <div class="mono text-[8px] text-stone-500 mt-0.5">${PANTHEON[d].domain.split(',')[0]}</div>
+                  class=${'px-2 py-2 rounded border text-left disabled:opacity-30 hover:brightness-125 flex items-center gap-2 ' + BG[PANTHEON[d].color]}>
+                  <${Face} deity=${d} size=${34} />
+                  <div class="min-w-0">
+                    <div class=${'serif text-xs truncate ' + TONE[PANTHEON[d].color]}>${PANTHEON[d].name.split(',')[0]}</div>
+                    <div class="mono text-[8px] text-stone-500 mt-0.5">favor ${w.favor[d]}</div>
+                  </div>
                 </button>`)}
             </div>
             ${w.over && html`
               <div class="mt-4 pt-3 border-t border-stone-800">
                 <p class="mono text-[9px] uppercase tracking-widest text-stone-600 mb-2">their regard for you, revealed</p>
                 ${rank.map((r) => html`
-                  <div key=${r.deity} class="flex justify-between mono text-[10px] py-0.5">
-                    <span class=${TONE[PANTHEON[r.deity].color]}>${PANTHEON[r.deity].name.split(',')[0]}</span>
+                  <div key=${r.deity} class="flex items-center gap-2 mono text-[10px] py-1">
+                    <${Face} deity=${r.deity} size=${24} />
+                    <span class=${'flex-1 ' + TONE[PANTHEON[r.deity].color]}>${PANTHEON[r.deity].name.split(',')[0]}</span>
                     <span class="text-stone-500">favor ${w.favor[r.deity]} · wrath ${r.anger.toFixed(0)}</span>
                   </div>`)}
               </div>`}

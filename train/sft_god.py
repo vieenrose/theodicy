@@ -92,7 +92,9 @@ def main():
     # --- sanity: does it emit legal-looking bids? -----------------------------
     model.eval().cuda()
     probe = ds.rows[0]["prompt"]
-    ids = tok(probe, return_tensors="pt").to("cuda")
+    # return_token_type_ids=False: the fast tokenizer emits token_type_ids, which
+    # model.generate() rejects as an unexpected kwarg — drop it at the source.
+    ids = tok(probe, return_tensors="pt", return_token_type_ids=False).to("cuda")
     with torch.no_grad():
         out = model.generate(**ids, max_new_tokens=8, do_sample=False,
                              pad_token_id=tok.pad_token_id)
