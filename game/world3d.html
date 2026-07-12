@@ -33,6 +33,7 @@ const DAY_SECS = 13;                                    // real seconds per day 
 // ---- procedural audio: synthesized score + SFX (Web Audio, no files, CSP-safe) ----
 const AUDIO = (() => {
   let ctx, master, muted = false, drone = [], mGain = {}, mmode = 'explore';
+  let tracks = {}, played = 0, failed = 0, droneOn = false;   // track els + load state
   const now = () => ctx.currentTime;
   function ensure(){                                   // must be called from a user gesture
     if(!ctx){ try { ctx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
@@ -42,25 +43,30 @@ const AUDIO = (() => {
     if(ctx.state === 'suspended') ctx.resume();
   }
   function startMusic(){                               // two pre-generated tracks (Stable Audio), crossfaded by tension
-    let ok = false;
+    let built = 0;
     try {
       for(const name of ['explore','combat']){
         const el = new Audio('./music/'+name+'.mp3'); el.loop = true; el.preload = 'auto';
+        el.addEventListener('error', onTrackFail);     // 404 / decode / CSP block fails ASYNC — must be caught here
         const g = ctx.createGain(); g.gain.value = name==='explore' ? 0.85 : 0.0001;
         ctx.createMediaElementSource(el).connect(g); g.connect(master);
-        mGain[name] = g; el.play().catch(()=>{});
+        mGain[name] = g; tracks[name] = el;
+        el.play().then(()=>{ played++; }).catch(onTrackFail);
+        built++;
       }
-      ok = true;
-    } catch(e){ ok = false; }
-    if(!ok) droneFallback();                           // no files/decoder → synth drone keeps the air alive
+    } catch(e){ /* MediaElementSource unsupported — fall through to drone */ }
+    if(built < 2) droneFallback();                     // couldn't even build the graph
+    else setTimeout(()=>{ if(played === 0) droneFallback(); }, 4000);  // built but no track ever played → files dead
     bells();                                            // sparse tolling either way
   }
+  function onTrackFail(){ if(++failed >= 2) droneFallback(); }   // both stems dead → keep the air alive
   function setMode(m){                                  // 'explore' | 'combat' — crossfade the stems
     if(!ctx || m===mmode || !mGain[m]) return; mmode = m; const t = now();
     for(const k in mGain){ const g = mGain[k].gain; g.cancelScheduledValues(t);
       g.setValueAtTime(Math.max(0.0001, g.value), t); g.exponentialRampToValueAtTime(k===m?0.85:0.0001, t+2.2); }
   }
   function droneFallback(){                             // a slow dark drone: root+fifth+octave through a moving lowpass
+    if(droneOn || !ctx) return; droneOn = true;         // idempotent: only ever one drone, even if both callers fire
     const filt = ctx.createBiquadFilter(); filt.type='lowpass'; filt.frequency.value=360; filt.Q.value=5; filt.connect(master);
     const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value=0.05; lg.gain.value=180; lfo.connect(lg); lg.connect(filt.frequency); lfo.start();
     for(const f of [55, 82.4, 110]){ const o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.detune.value=Math.random()*8-4;
@@ -86,7 +92,8 @@ const AUDIO = (() => {
     death:  ()=>{ tone(220,1.1,'sawtooth',0.22,55); },
     boss:   ()=>{ tone(48,1.8,'sawtooth',0.28); [0,3,7].forEach((s,i)=>setTimeout(()=>tone(110*Math.pow(2,s/12),0.6,'square',0.13),i*150)); },
   };
-  function toggleMute(){ muted=!muted; if(master) master.gain.linearRampToValueAtTime(muted?0:0.5, now()+0.3); }
+  function toggleMute(){ muted=!muted; if(master) master.gain.linearRampToValueAtTime(muted?0:0.5, now()+0.3);
+    for(const k in tracks){ if(muted) tracks[k].pause(); else tracks[k].play().catch(()=>{}); } }  // stop decoding, not just silence
   return { ensure, sfx, setMode, toggleMute, muted:()=>muted, live:()=>!!ctx };
 })();
 const GODF = { vurm:392, kel:311, oss:523, ithra:466 };   // a cast pitch per god
