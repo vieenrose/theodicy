@@ -33,8 +33,13 @@ const DAY_SECS = 13;                                    // real seconds per day 
 
 // ---- procedural audio: synthesized score + SFX (Web Audio, no files, CSP-safe) ----
 const AUDIO = (() => {
-  let ctx, master, muted = false, drone = [], mGain = {}, mmode = 'explore';
+  let ctx, master, muted = false, drone = [], mmode = 'explore';
   let tracks = {}, played = 0, failed = 0, droneOn = false;   // track els + load state
+  // NOTE: music plays via PLAIN <audio> volume (not a MediaElementSource) — on the HF Space the
+  // mp3s redirect to a cross-origin CDN, which taints Web-Audio-routed media to SILENCE. Direct
+  // playback is CORS-immune. Only the synthesized SFX/bells/drone go through the Web Audio graph.
+  const MVOL = 0.85;
+  let mvol = {explore:0, combat:0}, mtarget = {explore:MVOL, combat:0}, musicTimer = 0;
   const now = () => ctx.currentTime;
   function ensure(){                                   // must be called from a user gesture
     if(!ctx){ try { ctx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
@@ -42,30 +47,30 @@ const AUDIO = (() => {
       master.gain.linearRampToValueAtTime(muted?0:0.9, ctx.currentTime + 2.5);
       startMusic(); }
     if(ctx.state === 'suspended') ctx.resume();
-    if(!muted) for(const k in tracks){ if(tracks[k].paused) tracks[k].play().catch(()=>{}); }  // retry any autoplay-blocked stem on later gestures
+    if(!muted) for(const k in tracks){ if(tracks[k].paused) tracks[k].play().catch(()=>{}); }  // retry autoplay-blocked stems on later gestures
   }
   function startMusic(){                               // two pre-generated tracks (Stable Audio), crossfaded by tension
     let built = 0;
     try {
       for(const name of ['explore','combat']){
         const el = new Audio('./music/'+name+'.mp3'); el.loop = true; el.preload = 'auto';
-        el.addEventListener('error', onTrackFail);     // 404 / decode / CSP block fails ASYNC — must be caught here
-        const g = ctx.createGain(); g.gain.value = name==='explore' ? 1.0 : 0.0001;
-        ctx.createMediaElementSource(el).connect(g); g.connect(master);
-        mGain[name] = g; tracks[name] = el;
+        el.volume = muted ? 0 : mvol[name];            // direct volume — NOT routed through Web Audio
+        el.addEventListener('error', onTrackFail);     // 404 / decode / CSP fails ASYNC — caught here
+        tracks[name] = el;
         el.play().then(()=>{ played++; }).catch(onTrackFail);
         built++;
       }
-    } catch(e){ /* MediaElementSource unsupported — fall through to drone */ }
-    if(built < 2) droneFallback();                     // couldn't even build the graph
-    else setTimeout(()=>{ if(played === 0) droneFallback(); }, 4000);  // built but no track ever played → files dead
+    } catch(e){ /* Audio unsupported — fall through to drone */ }
+    if(built < 2) droneFallback();
+    else { musicTimer = setInterval(fadeTick, 50); setTimeout(()=>{ if(played === 0) droneFallback(); }, 4000); }
     bells();                                            // sparse tolling either way
   }
+  function fadeTick(){                                  // manual volume crossfade (Web-Audio ramps can't touch a plain <audio>)
+    for(const k in tracks){ mvol[k] += (mtarget[k]-mvol[k])*0.09; try { tracks[k].volume = muted?0:Math.max(0,Math.min(1,mvol[k])); } catch(e){} } }
   function onTrackFail(){ if(++failed >= 2) droneFallback(); }   // both stems dead → keep the air alive
-  function setMode(m){                                  // 'explore' | 'combat' — crossfade the stems
-    if(!ctx || m===mmode || !mGain[m]) return; mmode = m; const t = now();
-    for(const k in mGain){ const g = mGain[k].gain; g.cancelScheduledValues(t);
-      g.setValueAtTime(Math.max(0.0001, g.value), t); g.exponentialRampToValueAtTime(k===m?1.0:0.0001, t+2.2); }
+  function setMode(m){                                  // 'explore' | 'combat' — retarget the crossfade
+    if(m===mmode) return; mmode = m;
+    mtarget.explore = (m==='explore') ? MVOL : 0.0; mtarget.combat = (m==='combat') ? MVOL : 0.0;
   }
   function droneFallback(){                             // a slow dark drone: root+fifth+octave through a moving lowpass
     if(droneOn || !ctx) return; droneOn = true;         // idempotent: only ever one drone, even if both callers fire
@@ -290,7 +295,8 @@ function storyTick(){ if(!started||w.over) return; checkCrisis(); maybeOfferCove
 async function awakenModel(){
   if(godLoading || godBackend==='supra') return;
   godLoading=true; godPct=0; toast='The divine mind stirs…'; toastT=3;
-  for(const dev of ['webgpu','wasm']){
+  const devs = navigator.gpu ? ['webgpu','wasm'] : ['wasm'];   // don't burn time probing absent WebGPU
+  for(const dev of devs){
     try{
       const s = new SupraGod('Luigi/supra-god-onnx', { dtype:'q4', device:dev });
       await s.load(p=>{ if(p && p.status==='progress') godPct=Math.round(p.progress||0); });
