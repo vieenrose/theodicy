@@ -22,11 +22,13 @@
 <div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
 <script type="module">
 import * as THREE from 'https://esm.sh/three@0.160.0';
-import { newWorld, stepTurn, PANTHEON, DEITY_IDS, ranking } from './engine.js';
+import { newWorld, applyPlayerAction, upkeepTick, divineStrike, PANTHEON, DEITY_IDS, ranking } from './engine.js';
 import { HeuristicGod } from './gods.js';
 
-// ---- engine state ----
+// ---- engine state (REAL-TIME: no turns; time flows, gods act on their own cadence) ----
 let w = newWorld(), god = new HeuristicGod((Date.now() & 0xffff) || 1);
+let dayT = 0, day = 1, divPool = 0, divBusy = false;   // day timer + divine cadence
+const DAY_SECS = 13;                                    // real seconds per day of attrition
 let omen = null, pending = null, reads = [], busy = false, shrineMenu = false;
 
 // ---- three.js scene ----
@@ -171,14 +173,13 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase();
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
-async function interact(){ if(busy||w.over||encounter) return; const n=nearest(); if(!n) return;
+function interact(){ if(w.over||encounter) return; const n=nearest(); if(!n) return;
   if(n.id==='ridge' && w.tension>55){ startEncounter(); return; }   // war on the ridge → skirmish
-  if(n.s.shrine){shrineMenu=true;return;} await doTurn(n.s.act); }
-async function chooseOffer(i){ shrineMenu=false; await doTurn({action:'offer', deity:DEITY_IDS[i]}); }
-async function doTurn(a){ busy=true; shrineMenu=false; const before=w.ledger.length; await stepTurn(w,a.action,a.deity,god);
-  if(w.ledger.length>before){ const e=w.ledger.at(-1); omen={text:e.omen,turn:e.turn}; pending={idx:w.ledger.length-1,actual:e.deity}; } else {omen=null;pending=null;} busy=false; }
+  if(n.s.shrine){shrineMenu=true;return;} doAct(n.s.act); }
+function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_IDS[i]}); }
+function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity); }   // instant — no turn taken
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; reads.push({correct:guess===pending.actual}); pending={...pending,result:{guess,correct:guess===pending.actual}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
-function restart(){ w=newWorld(); reads=[]; omen=null; pending=null; }
+function restart(){ w=newWorld(); reads=[]; omen=null; pending=null; day=1; dayT=0; divPool=0; }
 window.__acc=accuse; window.restart=restart;
 
 // ---- loop ----
@@ -186,6 +187,14 @@ const clock = new THREE.Clock();
 function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  // real-time flow: time passes and the gods act on their own — no turns taken
+  if(!w.over && !encounter){
+    dayT += dt;
+    if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ w.over = true; w.won = false; } }
+    divPool += dt * (0.5 + w.tension * 0.02);
+    if(divPool >= 10 && !divBusy){ divPool = 0; divBusy = true;
+      divineStrike(w, god).then(act => { if(act){ omen = {text:act.omen, turn:act.turn}; pending = {idx:w.ledger.length-1, actual:act.deity}; } divBusy = false; }); }
+  }
   // move (world-relative)
   if(!busy && !w.over){ let dx=0,dz=0;
     if(keys.has('w')||keys.has('arrowup'))dz--; if(keys.has('s')||keys.has('arrowdown'))dz++;
@@ -243,7 +252,7 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
    <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
      <div class="flex gap-5 items-baseline">
        <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· the vale in 3D</span></span>
-       <span class="mono text-xs">turn <span class="text-stone-200">${w.turn}</span>/${w.maxTurns}</span>
+       <span class="mono text-xs">day <span class="text-stone-200">${day}</span></span>
        <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water} · morale ${v.morale}</span>
        <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${w.tension}</span>
        <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
@@ -259,7 +268,7 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
    ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
    ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">WASD / arrows to walk · approach a place and press E</div>`:''}
    ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? 1–4</span>${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ it was '+PANTHEON[pending.actual].name.split(',')[0]}</p>`:''}</div></div>`:''}
-   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">${w.won?'The vale endures.':'The vale is empty.'}</p><p class="serif italic text-stone-400 mt-2">You read ${correct}/${reads.length} of their hands.</p><button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>`:''}`;
+   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">The vale is empty.</p><p class="serif italic text-stone-400 mt-2">It endured ${day} days. You read ${correct}/${reads.length} of their hands.</p><button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>`:''}`;
 }
 animate();
 </script>

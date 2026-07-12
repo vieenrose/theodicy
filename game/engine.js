@@ -305,3 +305,52 @@ export async function stepTurn(w, playerAction, deityArg, god) {
   else if (w.turn > w.maxTurns) { w.over = true; w.won = true; }
   return w;
 }
+
+// ---------------------------------------------------------------------------
+// REAL-TIME HOOKS
+// For continuous (non-turn-based) modes: the same arbiter logic as stepTurn,
+// split so time can flow on its own. upkeepTick() is one "day" of attrition;
+// divineStrike() is one god acting. Both preserve every guarantee (legalBids
+// enforces the escalation cap, cooldowns, and the pool; validateBid rejects
+// anything illegal), so a real-time god is exactly as lawful as a turn-based one.
+// ---------------------------------------------------------------------------
+export function upkeepTick(w) {
+  const v = w.village;
+  v.food -= Math.ceil(v.pop / 4);
+  v.water -= 1;
+  if (v.food < 0) { v.pop -= 1; v.morale -= 8; v.food = 0; w.log.push('There is not enough to eat.'); }
+  if (v.water < 0) { v.pop -= 1; v.water = 0; w.log.push('The water runs out.'); }
+  if (w.sites.shrine.desecrated) w.bandits.grievance += 1;
+  w.pool += 2 + Math.floor(w.tension / 25);
+  v.pop = Math.max(0, v.pop);
+  v.food = Math.max(0, v.food); v.water = Math.max(0, v.water);
+  v.morale = clamp(v.morale, 0, 100);
+  w.tension = clamp(w.tension, 0, 100);
+  return w;
+}
+
+export async function divineStrike(w, god) {
+  const legal = legalBids(w);
+  let acted = null;
+  if (legal.length) {
+    const bid = await god.decide(w, legal);
+    const ok = validateBid(w, bid);
+    if (ok) {
+      w.pool -= ok.cost;
+      applyVerb(w, ok.verb, ok.target);
+      w.cooldowns[ok.deity] = 2;
+      w.escalationStreak = VERBS[ok.verb].esc ? w.escalationStreak + 1 : 0;
+      const entry = {
+        turn: w.turn, deity: ok.deity, verb: ok.verb, target: ok.target,
+        reason: ok.reason || '(unstated)', omen: ok.omen || '(no sign)', cost: ok.cost,
+      };
+      w.ledger.push(entry);
+      w.omens.push({ turn: w.turn, text: entry.omen });
+      acted = entry;
+    }
+  }
+  for (const d of DEITY_IDS) w.cooldowns[d] = Math.max(0, w.cooldowns[d] - 1);
+  const v = w.village;
+  v.pop = Math.max(0, v.pop); v.morale = clamp(v.morale, 0, 100); w.tension = clamp(w.tension, 0, 100);
+  return acted;
+}

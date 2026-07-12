@@ -22,7 +22,7 @@
 <div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
 <canvas id="c"></canvas>
 <script type="module">
-import { newWorld, stepTurn, PANTHEON, DEITY_IDS, ranking, VERBS } from './engine.js';
+import { newWorld, applyPlayerAction, upkeepTick, divineStrike, PANTHEON, DEITY_IDS, ranking, VERBS } from './engine.js';
 import { HeuristicGod } from './gods.js';
 
 const cv = document.getElementById('c'), g = cv.getContext('2d'), ui = document.getElementById('ui');
@@ -37,6 +37,7 @@ function view(){ const s = Math.min(cv.width/WW, cv.height/WH); return { s, ox:(
 function toWorld(px,py){ const v=view(); return { x:(px-v.ox)/v.s, y:(py-v.oy)/v.s }; }
 
 let w = newWorld(), god = new HeuristicGod((Date.now()&0xffff)||1);
+let dayT = 0, day = 1, divPool = 0, divBusy = false; const DAY_SECS = 13;   // real-time, no turns
 let hero = { x: 500, y: 340 }, moveTarget = null, busy = false;
 let omen = null, pending = null, reads = [], flash = null, msg = 'Use WASD / arrows to walk. Step onto a place and press E.';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -67,29 +68,14 @@ cv.addEventListener('pointerdown', e => { moveTarget = toWorld(e.clientX, e.clie
 let shrineMenu = false;
 function nearestPlace(){ let best=null,bd=1e9; for(const p of PLACES){ const d=Math.hypot(hero.x-p.x,hero.y-p.y); if(d<p.r && d<bd){bd=d;best=p;} } return best; }
 
-async function interact(){
-  if (busy || w.over) return;
+function interact(){
+  if (w.over) return;
   const p = nearestPlace(); if (!p) return;
   if (p.shrine){ shrineMenu = true; return; }
-  await doTurn(p.act());
+  doAct(p.act());
 }
-async function chooseOffer(i){
-  shrineMenu = false;
-  // shrine options: 0-3 offer to a god, else handled elsewhere
-  await doTurn({ action:'offer', deity: DEITY_IDS[i] });
-}
-async function doTurn(a){
-  busy = true; shrineMenu = false;
-  const before = w.ledger.length;
-  await stepTurn(w, a.action, a.deity, god);
-  if (w.ledger.length > before){
-    const e = w.ledger.at(-1);
-    omen = { text: e.omen, verb: e.verb, turn: e.turn };
-    pending = { idx: w.ledger.length - 1, actual: e.deity };
-    flash = { t: 1 };
-  } else { omen = null; pending = null; }
-  busy = false;
-}
+function chooseOffer(i){ shrineMenu = false; doAct({ action:'offer', deity: DEITY_IDS[i] }); }
+function doAct(a){ shrineMenu = false; applyPlayerAction(w, a.action, a.deity); }   // instant — no turn
 function accuse(i){
   if (!pending || pending.result) return;
   const guess = DEITY_IDS[i];
@@ -97,7 +83,7 @@ function accuse(i){
   pending = { ...pending, result: { guess, correct: guess === pending.actual } };
   setTimeout(()=>{ if(pending&&pending.result) pending=null; }, 2200);
 }
-function restart(){ w = newWorld(); reads = []; omen = null; pending = null; }
+function restart(){ w = newWorld(); reads = []; omen = null; pending = null; day = 1; dayT = 0; divPool = 0; }
 window.restart = restart;
 
 // ---------- loop ----------
@@ -108,7 +94,13 @@ function frame(ts){
 }
 function step(dt){
   if (flash) flash.t -= dt*1.4;
-  if (busy || w.over) return;
+  if (w.over) return;
+  // real-time flow: time passes and gods act on their own — no turns
+  dayT += dt;
+  if (dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if (w.village.pop <= 0){ w.over = true; w.won = false; } }
+  divPool += dt * (0.5 + w.tension * 0.02);
+  if (divPool >= 10 && !divBusy){ divPool = 0; divBusy = true;
+    divineStrike(w, god).then(act => { if (act){ omen = { text:act.omen, verb:act.verb, turn:act.turn }; pending = { idx:w.ledger.length-1, actual:act.deity }; flash = { t:1 }; } divBusy = false; }); }
   let dx=0, dy=0;
   if (keys.has('arrowup')||keys.has('w')) dy--; if (keys.has('arrowdown')||keys.has('s')) dy++;
   if (keys.has('arrowleft')||keys.has('a')) dx--; if (keys.has('arrowright')||keys.has('d')) dx++;
@@ -172,7 +164,7 @@ function drawUI(){
    <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
      <div class="flex gap-5 items-baseline">
        <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· walk the vale</span></span>
-       <span class="mono text-xs">turn <span class="text-stone-200">${w.turn}</span>/${w.maxTurns}</span>
+       <span class="mono text-xs">day <span class="text-stone-200">${day}</span></span>
        ${stat('☺',v.pop,v.pop<=4)} ${stat('🌾',v.food,v.food<=2)} ${stat('💧',v.water,v.water<=2)} ${stat('morale',v.morale,v.morale<=25)}
        <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${w.tension}</span>
        <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
@@ -196,8 +188,8 @@ function drawUI(){
          : ''}
        </div></div>` : ''}
    ${w.over ? `<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto">
-       <div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">${w.won?'The vale endures.':'The vale is empty.'}</p>
-       <p class="serif italic text-stone-400 mt-2">You read ${correct}/${reads.length} of their hands.</p>
+       <div class="text-center"><p class="serif text-4xl text-rose-300">The vale is empty.</p>
+       <p class="serif italic text-stone-400 mt-2">It endured ${day} days. You read ${correct}/${reads.length} of their hands.</p>
        <button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>` : ''}`;
 }
 window.__acc = accuse;
