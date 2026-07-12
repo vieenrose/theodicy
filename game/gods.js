@@ -88,7 +88,7 @@ export class SupraGod {
 
   async load(onProgress) {
     const { AutoTokenizer, AutoModelForCausalLM } = await import(
-      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.5'
+      'https://esm.sh/@huggingface/transformers@3.7.5'   // esm.sh: the CDN the static Space's CSP allows
     );
     this.tok = await AutoTokenizer.from_pretrained(this.modelId);
     this.model = await AutoModelForCausalLM.from_pretrained(this.modelId, {
