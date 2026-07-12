@@ -220,6 +220,40 @@ let heroHp = 100, heroMax = 100, heroDmg = 16, heroFlash = 0, invuln = 0;
 let level = 1, xp = 0, points = 1, deaths = 0, fury = 0;
 let mana = 60, manaMax = 60, showTree = false, castCd = {};
 let enemies = [], loot = [], hits = [], spawnT = 4, toast = '', toastT = 0;
+
+// ---- QUEST CAMPAIGN: the gods' own acts drive a three-act adventure ----
+let questWell=false, championSlain=false, covenant=null, covenantOpen=false;
+let actIdx=0, questBanner=null, questBannerT=0, endKind=null;
+const COV_POWER={ vurm:'flood', kel:'fury', oss:'mend', ithra:'smite' };   // patron gift
+const END_TEXT={
+  vurm:"You knelt to Vurm. The well runs clear and the fields drink deep — Aldermere blooms in a mercy that asks nothing back.",
+  kel :"You swore to Kel. The ridge is yours by the blade; the vale prospers under a dominion no raider dares test.",
+  oss :"You took Oss's hand. What the gods broke, you mend — the vale learns to forgive even heaven.",
+  ithra:"You chose Ithra. Judgement falls clean and cold; the vale is ordered, lawful, and a little afraid.",
+};
+const ACTS=[
+ { t:'Act I · The Souring',  brief:'The well runs foul — Vurm is slighted.',
+   goal:'Reach the Thirsting Well and tend its water   [E]',
+   start:()=>{ if(w.sites&&w.sites.well) w.sites.well.clean=false; },
+   done:()=>questWell },
+ { t:'Act II · The Warband', brief:'Kel musters a warband. His Champion marches on Aldermere.',
+   goal:'Defeat the Champion of Kel',
+   start:()=>{ w.tension=Math.max(w.tension,72); w.bandits.strength=Math.max(w.bandits.strength,4); forceChampion(); },
+   done:()=>championSlain },
+ { t:'Act III · The Covenant',brief:'The vale still breathes. Now choose whose hand shall guide it.',
+   goal:'Choose a god to serve   [1–4]',
+   start:()=>{ covenantOpen=true; },
+   done:()=>covenant!=null },
+];
+function startAct(i){ actIdx=i; const a=ACTS[i]; if(a.start)a.start(); questBanner=a; questBannerT=5.5; }
+function forceChampion(){ if(enemies.some(e=>e.boss&&!e.dying)) return; const T=ETYPES.champion, rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.1));
+  enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp,boss:true,tname:T.name,cool:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); }
+function chooseCovenant(i){ if(!covenantOpen) return; covenant=DEITY_IDS[i]; covenantOpen=false; unlocked.add(COV_POWER[covenant]); toast=`You covenant with ${PANTHEON[covenant].name.split(',')[0]}.`; toastT=3; }
+function endGame(won,kind){ w.over=true; w.won=won; endKind=kind; }
+function questTick(){                    // advance the campaign each frame while alive
+  if(w.over || actIdx>=ACTS.length) return;
+  if(ACTS[actIdx].done()){ if(actIdx<ACTS.length-1) startAct(actIdx+1); else endGame(true, covenant); }
+}
 const ETYPES = {
   raider:  { hp:26,  dmg:7,  spd:10, r:0.9, color:0xfb7185, xp:6,  scale:1.0, name:'raider' },
   wolf:    { hp:15,  dmg:5,  spd:17, r:0.7, color:0xd6a15a, xp:5,  scale:0.8, name:'wolf' },
@@ -293,7 +327,7 @@ function updateCombat(dt){
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv);
-      if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); }
+      if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(actIdx===1) championSlain=true; }
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
     if(e.dying){ e.dying-=dt; e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
     e.mesh.children.forEach(c=>c.material.emissive.setHex(e.hit>0?0xffffff:0x3a0d0d)); if(e.hit>0)e.hit-=dt; if(e.slow>0)e.slow-=dt;
@@ -322,7 +356,7 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
   if(KEYMAP[k]) cast(KEYMAP[k]);                 // Q/R/F/V → god-powers
   if(k==='c') showTree = !showTree;              // Covenant board
   if(k==='m') AUDIO.toggleMute();                // mute
-  if(['1','2','3','4'].includes(k)){ if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
+  if(['1','2','3','4'].includes(k)){ if(covenantOpen) chooseCovenant(+k-1); else if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
   if(k==='x'&&w.over) restart();                 // (R is a power key now)
 });
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
@@ -331,7 +365,7 @@ function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SIT
 function interact(){ if(w.over) return; const n=nearest(); if(!n) return;
   if(n.s.shrine){shrineMenu=true;return;} doAct(n.s.act); }
 function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_IDS[i]}); }
-function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity); }   // instant — no turn taken
+function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity); if(a.action==='tend_well'&&actIdx===0) questWell=true; }   // instant — no turn taken
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; reads.push({correct:guess===pending.actual}); pending={...pending,result:{guess,correct:guess===pending.actual}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
 function restart(){
   for(const e of enemies) if(e.mesh.parent) scene.remove(e.mesh);
@@ -339,7 +373,9 @@ function restart(){
   w=newWorld(); reads=[]; omen=null; pending=null; day=1; dayT=0; divPool=0;
   enemies=[]; loot=[]; hits=[]; toast=''; toastT=0; heroHp=100; heroMax=100; heroDmg=16; level=1; xp=0; points=1; deaths=0; fury=0;
   mana=60; manaMax=60; unlocked=new Set(['mend']); castCd={}; spawnT=4; invuln=0; showTree=false;
+  questWell=false; championSlain=false; covenant=null; covenantOpen=false; endKind=null;
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
+  startAct(0);                                          // begin the campaign anew
 }
 window.__acc=accuse; window.restart=restart;
 
@@ -351,7 +387,7 @@ function animate(){
   // real-time flow: time passes and the gods act on their own — no turns taken
   if(!w.over){
     dayT += dt;
-    if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ w.over = true; w.won = false; } }
+    if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ endGame(false, 'fall'); } }
     divPool += dt * (0.5 + w.tension * 0.02);
     if(divPool >= 10 && !divBusy){ divPool = 0; divBusy = true;
       divineStrike(w, god).then(act => { if(act){ omen = {text:act.omen, turn:act.turn}; pending = {idx:w.ledger.length-1, actual:act.deity}; AUDIO.sfx.omen(); } divBusy = false; }); }
@@ -373,6 +409,8 @@ function animate(){
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
   if(!w.over) updateCombat(dt);
+  if(!w.over) questTick();                                            // advance the campaign
+  if(questBannerT>0) questBannerT-=dt;                                // act-title card fades
   AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
   if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
@@ -423,6 +461,7 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'cast') cast(arg);
   else if (cmd === 'unlock') unlock(arg);
   else if (cmd === 'tree' || cmd === 'closetree') showTree = (cmd === 'tree');
+  else if (cmd === 'cov') chooseCovenant(+arg);
   else if (cmd === 'mute') AUDIO.toggleMute();
 });
 function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.correct).length;
@@ -451,6 +490,8 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
      <span class="flex gap-3 items-center"><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
    </div>
    ${fxT>0?`<div class="absolute inset-0" style="background:${fxC};opacity:${(fxT*0.4).toFixed(2)}"></div>`:''}
+   ${!w.over&&ACTS[actIdx]?`<div class="absolute top-14 left-5 max-w-[240px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-amber-400/90">${ACTS[actIdx].t}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${ACTS[actIdx].goal}</div></div>`:''}
+   ${questBannerT>0&&questBanner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,questBannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${questBanner.t}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${questBanner.brief}</p></div>`:''}
    ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
    ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
    ${toastT>0?`<div class="absolute top-28 left-1/2 -translate-x-1/2 mono text-xs text-amber-200 bg-black/60 px-3 py-1 rounded border border-stone-800">${toast}</div>`:''}
@@ -464,9 +505,16 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
    ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
    ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click to move · click a foe to attack · WASD also walks · Space strikes · approach a place & press E</div>`:''}
+   ${covenantOpen&&!w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center max-w-xl px-6"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">Act III · The Covenant</p><p class="serif text-3xl text-stone-100 mt-3 mb-1">Whose hand shall guide the vale?</p><p class="serif italic text-stone-500 mb-5">Your choice ends the tale — and grants that god's power.</p><div class="flex flex-wrap gap-2 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="cov:${i}" class="pointer-events-auto mono text-xs px-4 py-2.5 rounded border text-stone-200 hover:bg-stone-800" style="border-color:${GODC[d]}88"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]} <span class="text-stone-500">· ${POWERS[COV_POWER[d]].name}</span></button>`).join('')}</div></div></div>`:''}
    ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? 1–4</span>${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ it was '+PANTHEON[pending.actual].name.split(',')[0]}</p>`:''}</div></div>`:''}
-   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">The vale is empty.</p><p class="serif italic text-stone-400 mt-2">You reached level ${level}, fell ${deaths} times, and read ${correct}/${reads.length} of their hands over ${day} days.</p><button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">rise again ▸ (X)</button></div></div>`:''}`;
+   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6">
+     <p class="mono text-[10px] uppercase tracking-[0.35em] ${w.won?'text-amber-400':'text-rose-400'}">${w.won?'The Tale Is Told':'The Vale Falls'}</p>
+     <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?PANTHEON[endKind].name.split(',')[0]+"'s Vale":'The vale is empty.'}</p>
+     <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?(END_TEXT[endKind]||'The vale endures under your watch.'):'Aldermere starved before you could name a god to save it.'}</p>
+     <p class="mono text-[11px] text-stone-500 mt-4">level ${level} · fell ${deaths}× · ${day} days · read ${correct}/${reads.length} hands</p>
+     <button data-act="restart" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin anew ▸ (X)</button></div></div>`:''}`;
 }
+startAct(0);   // Act I begins: the well sours
 animate();
 </script>
 </body>
