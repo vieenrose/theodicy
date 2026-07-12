@@ -26,6 +26,11 @@ import { newWorld, stepTurn, PANTHEON, DEITY_IDS, ranking, VERBS } from './engin
 import { HeuristicGod } from './gods.js';
 
 const cv = document.getElementById('c'), g = cv.getContext('2d'), ui = document.getElementById('ui');
+ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame innerHTML rebuilds
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const [cmd, arg] = el.dataset.act.split(':');
+  if (cmd === 'acc') accuse(+arg); else if (cmd === 'restart') restart();
+});
 function resize(){ cv.width = innerWidth; cv.height = innerHeight; } addEventListener('resize', resize); resize();
 const WW = 1000, WH = 640;                       // world coords; we letterbox-scale to the screen
 function view(){ const s = Math.min(cv.width/WW, cv.height/WH); return { s, ox:(cv.width-WW*s)/2, oy:(cv.height-WH*s)/2 }; }
@@ -86,7 +91,7 @@ async function doTurn(a){
   busy = false;
 }
 function accuse(i){
-  if (!pending) return;
+  if (!pending || pending.result) return;
   const guess = DEITY_IDS[i];
   reads.push({ correct: guess === pending.actual, guess, actual: pending.actual });
   pending = { ...pending, result: { guess, correct: guess === pending.actual } };
@@ -113,7 +118,6 @@ function step(dt){
 }
 
 // ---------- render ----------
-const IMG = {}; for (const d of DEITY_IDS){ const im=new Image(); im.src='./avatars/'+d+'.png'; IMG[d]=im; }
 function render(){
   const v = view();
   g.fillStyle='#0c0a09'; g.fillRect(0,0,cv.width,cv.height);
@@ -186,7 +190,7 @@ function drawUI(){
          <p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>
          ${pending && !pending.result ? `<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center">
              <span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? press 1–4</span>
-             ${DEITY_IDS.map((d,i)=>`<button onclick="window.__acc(${i})" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}
+             ${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}
            </div>`
          : pending && pending.result ? `<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ you said '+PANTHEON[pending.result.guess].name.split(',')[0]} — it was ${PANTHEON[pending.actual].name.split(',')[0]}</p>`
          : ''}
@@ -194,7 +198,7 @@ function drawUI(){
    ${w.over ? `<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto">
        <div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">${w.won?'The vale endures.':'The vale is empty.'}</p>
        <p class="serif italic text-stone-400 mt-2">You read ${correct}/${reads.length} of their hands.</p>
-       <button onclick="window.restart()" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>` : ''}`;
+       <button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>` : ''}`;
 }
 window.__acc = accuse;
 

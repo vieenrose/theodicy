@@ -285,12 +285,21 @@ function drawEnt(e) {
 // UI (DOM overlay)
 // ---------------------------------------------------------------------------
 const ui = document.getElementById('ui');
+ui.addEventListener('pointerdown', (e) => {   // event delegation: survives innerHTML rebuilds
+  const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
+  const [cmd, arg] = el.dataset.act.split(':');
+  if (cmd === 'build') startBuild();
+  else if (cmd === 'tree') toggleTree();
+  else if (cmd === 'cast') cast(arg);
+  else if (cmd === 'unlock') unlock(arg);
+  else if (cmd === 'new') newGame();
+});
 function drawUI() {
   const dvPct = Math.min(100, 100 * devotion / nextLevel(level));
   const mnPct = Math.min(100, 100 * mana / manaMax);
   const hotbar = POWER_KEYS.filter(k => unlocked.has(k)).map(k => {
     const pw = POWERS[k], cd = castCd[k] || 0, ready = cd <= 0 && mana >= pw.cost;
-    return `<button onclick="cast('${k}')" ${ready ? '' : 'disabled'} title="${pw.desc} · ${pw.cost} mana"
+    return `<button data-act="cast:${k}" ${ready ? '' : 'disabled'} title="${pw.desc} · ${pw.cost} mana"
       class="relative mono text-[10px] px-2.5 py-2 rounded border ${ready ? 'hover:brightness-150' : 'opacity-40'}"
       style="border-color:${GODC[pw.god]}66;color:${GODC[pw.god]}">${pw.name}<span class="text-stone-500"> ${pw.cost}</span>
       ${cd > 0 ? `<span class="absolute inset-0 grid place-items-center bg-black/65 rounded text-stone-300">${cd.toFixed(0)}s</span>` : ''}</button>`;
@@ -300,16 +309,16 @@ function drawUI() {
       ${POWER_KEYS.filter(k => POWERS[k].god === gd).map(k => { const pw = POWERS[k], has = unlocked.has(k);
         return `<div class="mb-2.5"><div class="mono text-[11px] ${has ? 'text-stone-100' : 'text-stone-400'}">${pw.name}${has ? ' ✓' : ''}</div>
           <div class="mono text-[8px] text-stone-600 leading-tight">${pw.desc} · ${pw.cost} mana</div>
-          ${has ? '' : `<button onclick="unlock('${k}')" ${points >= pw.pts ? '' : 'disabled'}
+          ${has ? '' : `<button data-act="unlock:${k}" ${points >= pw.pts ? '' : 'disabled'}
             class="mt-1 mono text-[9px] px-2 py-0.5 rounded border ${points >= pw.pts ? 'border-stone-500 text-stone-200 hover:bg-stone-800' : 'border-stone-800 text-stone-600'}">unlock · ${pw.pts}pt</button>`}</div>`;
       }).join('')}</div>`;
-  const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" onclick="toggleTree()">
-    <div class="max-w-3xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" onclick="event.stopPropagation()">
+  const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="tree">
+    <div class="max-w-3xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" data-act="stop">
       <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Covenant Board</h2>
         <span class="mono text-xs text-amber-300">${points} covenant point${points !== 1 ? 's' : ''}</span></div>
       <div class="grid grid-cols-4 gap-3">${['vurm','kel','oss','ithra'].map(branch).join('')}</div>
       <p class="serif italic text-stone-500 text-xs mt-4">Hold the vale to earn Devotion; each level grants a point. Unlock a god's power, then wield it in the fight.</p>
-      <button onclick="toggleTree()" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸</button>
+      <button data-act="tree" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸</button>
     </div></div>` : '';
 
   ui.innerHTML = `
@@ -327,8 +336,8 @@ function drawUI() {
    </div>
    <div class="absolute bottom-0 inset-x-0 px-5 py-3 bg-gradient-to-t from-black/85 to-transparent flex items-end justify-between gap-4">
      <div class="pointer-events-auto flex gap-2 items-end flex-wrap">
-       <button onclick="startBuild()" class="mono text-[11px] px-3 py-2 rounded border ${grain >= COST.barracks ? 'border-stone-600 text-stone-200 hover:bg-stone-800' : 'border-stone-800 text-stone-600'}">＋ Barracks <span class="text-stone-500">(${COST.barracks}🌾)</span></button>
-       <button onclick="toggleTree()" class="mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40">✦ Covenant${points ? ` (${points})` : ''}</button>
+       <button data-act="build" class="mono text-[11px] px-3 py-2 rounded border ${grain >= COST.barracks ? 'border-stone-600 text-stone-200 hover:bg-stone-800' : 'border-stone-800 text-stone-600'}">＋ Barracks <span class="text-stone-500">(${COST.barracks}🌾)</span></button>
+       <button data-act="tree" class="mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40">✦ Covenant${points ? ` (${points})` : ''}</button>
        ${hotbar ? `<span class="mx-1 self-center text-stone-700">|</span>${hotbar}` : `<span class="mono text-[10px] text-stone-600 self-center">open the Covenant to unlock god-powers ▸</span>`}
      </div>
      ${omenT > 0 ? `<div class="serif italic text-stone-200 text-lg max-w-md text-right shrink-0">“${omen}”</div>` : ''}
@@ -338,7 +347,7 @@ function drawUI() {
      <div class="text-center">
        <p class="serif text-4xl ${over.win ? 'text-emerald-300' : 'text-rose-300'}">${over.win ? 'The vale holds.' : 'The vale is taken.'}</p>
        <p class="serif italic text-stone-400 mt-2">Level ${level} · ${over.win ? 'you never learned which of them stayed Kel’s hand.' : 'you never learned which of them opened the gate.'}</p>
-       <button onclick="newGame()" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin again ▸</button>
+       <button data-act="new" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin again ▸</button>
      </div></div>` : ''}`;
 }
 
