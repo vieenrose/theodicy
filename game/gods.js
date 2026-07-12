@@ -244,43 +244,38 @@ export class InstructGod {
     this.ready = true;
   }
 
+  // The WILL is the lawful oracle (a 360M can't hold the deity:verb format — measured 0/4).
+  // The VOICE is the model: free confabulation, where hallucination is WANTED.
   async decide(w, legal) {
     if (!this.ready) return this.fallback.decide(w, legal);
-    try {
-      const menu = [...new Set(legal.map((b) => `${b.deity}:${b.verb}`))];
-      const sys = 'You are the capricious pantheon of four gods — Vurm (water, drought), Kel (war), '
-        + 'Oss (mercy), Ithra (judgement) — acting upon a small failing valley. From the MENU pick '
-        + 'exactly one act, then utter a single short cryptic omen. Answer EXACTLY as: deity:verb | omen';
-      const usr = `The valley now:\n${digest(w)}\nMENU: ${menu.join(', ')}\nYour act:`;
-      const prompt = this.tok.apply_chat_template([
-        { role: 'system', content: sys },
-        { role: 'user', content: 'The valley now: the well is fouled, tension high.\nMENU: kel:raid, oss:mend\nYour act:' },
-        { role: 'assistant', content: 'kel:raid | Smoke stains the dawn; the ridge has found its appetite.' },
-        { role: 'user', content: usr },
-      ], { add_generation_prompt: true, tokenize: false });
-      const ids = this.tok(prompt);
-      const out = await this.model.generate({
-        ...ids, max_new_tokens: 42, do_sample: true,
-        temperature: this.temperature, top_p: 0.9, repetition_penalty: 1.1,
-      });
-      const tail = this.tok.batch_decode(out, { skip_special_tokens: true })[0].slice(prompt.length).trim();
-      const m = tail.match(/([a-z]+)\s*:\s*([a-z_]+)\s*[|\-–—:]*\s*(.*)/i);
-      let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
-      let src = chosen ? 'smol' : 'prior';
-      if (!chosen) {                                    // off-menu → anger-weighted legal pick (still lawful)
-        const rank = ranking(w).filter((r) => legal.some((b) => b.deity === r.deity));
-        const pk = (Math.random() < 0.75 ? rank[0] : (rank[1] || rank[0]));
-        const opts = legal.filter((b) => b.deity === pk.deity);
-        chosen = opts[Math.floor(Math.random() * opts.length)];
-      }
-      let omen = (m && m[3]) ? m[3] : tail.replace(/^[a-z]+\s*:\s*[a-z_]+\s*[|\-–—:]*/i, '');
-      omen = (omen || '').split('\n')[0].replace(/["]/g, '').trim();
-      if (omen.length < 8) omen = pick(OMENS[chosen.verb], Math.random);
-      return { deity: chosen.deity, verb: chosen.verb, target: null, reason: src, omen: omen.slice(0, 150) };
-    } catch (e) {
-      console.warn('InstructGod failed, falling back:', e);
-      return this.fallback.decide(w, legal);
-    }
+    const bid = await this.fallback.decide(w, legal);   // choice: capricious-but-lawful anger oracle
+    if (!bid) return bid;
+    try { bid.omen = await this.#omen(w, bid); bid.reason = 'smol-voice'; }
+    catch (e) { console.warn('InstructGod omen failed:', e); }   // keep the canned omen on failure
+    return bid;
+  }
+
+  // -- the confabulation pass: one short prophecy for the act the oracle chose --------------
+  async #omen(w, bid) {
+    const g = PANTHEON[bid.deity];
+    const ctx = `water ${w.village.water}, morale ${w.village.morale}, tension ${w.tension}`;
+    const prompt = this.tok.apply_chat_template([
+      { role: 'system', content: 'You are a doom-prophet of a dying valley. When a god acts, you speak ONE short, cryptic, ominous sentence of prophecy — vivid and strange. Reply with only that sentence.' },
+      { role: 'user', content: 'The god of war sends raiders down from the ridge.' },
+      { role: 'assistant', content: 'Smoke stains the dawn, and the ridge has found its appetite.' },
+      { role: 'user', content: `${g.name}, ${g.epithet || 'the unseen'}, works "${bid.verb}" upon the valley (${ctx}).` },
+    ], { add_generation_prompt: true, tokenize: false });
+    const ids = this.tok(prompt);
+    const inLen = ids.input_ids.dims[ids.input_ids.dims.length - 1];   // slice by TOKEN count, not string length
+    const out = await this.model.generate({
+      ...ids, max_new_tokens: 32, do_sample: true, temperature: this.temperature, top_p: 0.92, repetition_penalty: 1.3,
+    });
+    let text = this.tok.decode(Array.from(out.tolist()[0]).slice(inLen), { skip_special_tokens: true }).trim();
+    text = text.split('\n')[0].replace(/^["'\s]+|["'\s]+$/g, '').trim();
+    const cut = text.lastIndexOf('.'); if (cut > 12) text = text.slice(0, cut + 1);
+    const letters = (text.match(/[a-z]/gi) || []).length;
+    if (text.length < 12 || letters < text.length * 0.6) return pick(OMENS[bid.verb], Math.random);  // garbled → canned
+    return text.slice(0, 160);
   }
 }
 
