@@ -41,6 +41,7 @@ const AUDIO = (() => {
       master.gain.linearRampToValueAtTime(muted?0:0.9, ctx.currentTime + 2.5);
       startMusic(); }
     if(ctx.state === 'suspended') ctx.resume();
+    if(!muted) for(const k in tracks){ if(tracks[k].paused) tracks[k].play().catch(()=>{}); }  // retry any autoplay-blocked stem on later gestures
   }
   function startMusic(){                               // two pre-generated tracks (Stable Audio), crossfaded by tension
     let built = 0;
