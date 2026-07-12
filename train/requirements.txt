@@ -1,0 +1,9 @@
+torch>=2.4
+transformers>=4.44
+datasets>=2.20
+accelerate>=0.33
+optimum[onnxruntime]>=1.21
+onnx>=1.16
+onnxruntime>=1.18
+sentencepiece
+huggingface_hub
