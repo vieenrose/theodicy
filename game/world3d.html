@@ -32,7 +32,7 @@ const DAY_SECS = 13;                                    // real seconds per day 
 
 // ---- procedural audio: synthesized score + SFX (Web Audio, no files, CSP-safe) ----
 const AUDIO = (() => {
-  let ctx, master, muted = false, drone = [];
+  let ctx, master, muted = false, drone = [], mGain = {}, mmode = 'explore';
   const now = () => ctx.currentTime;
   function ensure(){                                   // must be called from a user gesture
     if(!ctx){ try { ctx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
@@ -41,12 +41,30 @@ const AUDIO = (() => {
       startMusic(); }
     if(ctx.state === 'suspended') ctx.resume();
   }
-  function startMusic(){                               // a slow dark drone: root+fifth+octave through a moving lowpass
+  function startMusic(){                               // two pre-generated tracks (Stable Audio), crossfaded by tension
+    let ok = false;
+    try {
+      for(const name of ['explore','combat']){
+        const el = new Audio('./music/'+name+'.mp3'); el.loop = true; el.preload = 'auto';
+        const g = ctx.createGain(); g.gain.value = name==='explore' ? 0.85 : 0.0001;
+        ctx.createMediaElementSource(el).connect(g); g.connect(master);
+        mGain[name] = g; el.play().catch(()=>{});
+      }
+      ok = true;
+    } catch(e){ ok = false; }
+    if(!ok) droneFallback();                           // no files/decoder → synth drone keeps the air alive
+    bells();                                            // sparse tolling either way
+  }
+  function setMode(m){                                  // 'explore' | 'combat' — crossfade the stems
+    if(!ctx || m===mmode || !mGain[m]) return; mmode = m; const t = now();
+    for(const k in mGain){ const g = mGain[k].gain; g.cancelScheduledValues(t);
+      g.setValueAtTime(Math.max(0.0001, g.value), t); g.exponentialRampToValueAtTime(k===m?0.85:0.0001, t+2.2); }
+  }
+  function droneFallback(){                             // a slow dark drone: root+fifth+octave through a moving lowpass
     const filt = ctx.createBiquadFilter(); filt.type='lowpass'; filt.frequency.value=360; filt.Q.value=5; filt.connect(master);
     const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value=0.05; lg.gain.value=180; lfo.connect(lg); lg.connect(filt.frequency); lfo.start();
     for(const f of [55, 82.4, 110]){ const o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.detune.value=Math.random()*8-4;
       const g=ctx.createGain(); g.gain.value=0.08; o.connect(g); g.connect(filt); o.start(); drone.push({o,g}); }
-    bells();
   }
   const SCALE=[0,3,5,7,10];
   function bells(){ if(ctx){ const s=SCALE[(Math.random()*SCALE.length)|0]+((Math.random()<0.4)?12:0); bell(220*Math.pow(2,s/12), now()+0.1, 0.05); }
@@ -69,7 +87,7 @@ const AUDIO = (() => {
     boss:   ()=>{ tone(48,1.8,'sawtooth',0.28); [0,3,7].forEach((s,i)=>setTimeout(()=>tone(110*Math.pow(2,s/12),0.6,'square',0.13),i*150)); },
   };
   function toggleMute(){ muted=!muted; if(master) master.gain.linearRampToValueAtTime(muted?0:0.5, now()+0.3); }
-  return { ensure, sfx, toggleMute, muted:()=>muted, live:()=>!!ctx };
+  return { ensure, sfx, setMode, toggleMute, muted:()=>muted, live:()=>!!ctx };
 })();
 const GODF = { vurm:392, kel:311, oss:523, ithra:466 };   // a cast pitch per god
 let omen = null, pending = null, reads = [], busy = false, shrineMenu = false;
@@ -294,6 +312,7 @@ function animate(){
     if(dx||dz){ const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
   if(!w.over) updateCombat(dt);
+  AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
   if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
   // camera follows (behind + above)
