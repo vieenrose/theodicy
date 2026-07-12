@@ -1,87 +1,116 @@
-# CLAUDE.md — context for a Claude Code session on the training box
+# CLAUDE.md
 
-You are running on an **RTX 3060** workstation. The human (Luigi) rsync'd this repo here to
-train the god model. Everything below is already designed; your job is execution + iteration.
+Handoff brief. This project was designed in a Cowork session and moved here to continue in
+Claude Code. Read this before touching anything.
 
-## The one idea
+## Machines
 
-`Supra-50M-Reasoning` produces flawless R1-style reasoning *form* with zero inferential
-*content* (it thinks HTML was invented at MIT in 1965). That is the diagnostic, not a defect:
+- **`luigi-inspiron135330`** (this Dell) — the repo lives at `~/Games/god-rpg`. Remote is
+  `github.com/vieenrose/theodicy` over HTTPS (SSH keys are not set up; `gh auth setup-git`
+  handles credentials).
+- **`user@training-machine`** — RTX 3060. Where the model gets trained. Reach it over ssh.
+  Nothing is installed there yet unless Luigi has since rsync'd this repo across.
+
+## The one idea — do not lose this
+
+[`SupraLabs/Supra-50M-Reasoning`](https://huggingface.co/SupraLabs/Supra-50M-Reasoning) emits
+flawless R1-style reasoning traces containing no reasoning. It believes HTML was invented at MIT
+in 1965. It has produced the phrase *"fast-drying fasties."*
+
+That is the diagnostic, not a defect:
 
 > **A 50M model reliably reproduces STRUCTURE and reliably CONFABULATES CONTENT.**
 
-So we never let it determine what is true. The architecture assigns it exactly two jobs:
+Every design decision here follows from that sentence. The model gets exactly two jobs, both
+chosen so its failure mode is harmless or *desirable*:
 
-1. **Choose** — but only by scoring a menu of legal bids enumerated in code (`legalBids()`).
-   One forward pass, argmax/sample over a closed set. It cannot be wrong, only capricious.
-   A god that chooses capriciously but lawfully is not a broken god. It is a god.
-2. **Speak the omens** — here we *want* free hallucination. Oracular utterance is supposed to
-   be semantically slippery. Prophecy that parses cleanly isn't prophecy. The weakness is the
-   aesthetic.
+1. **It chooses — from a menu it cannot escape.** `legalBids()` enumerates every legal act in
+   code. The model scores that closed set in one forward pass and samples. It never *generates*
+   a decision, so there is nothing to parse and nothing to validate. It cannot be wrong. It can
+   only be capricious — and a god that chooses capriciously but lawfully is a god.
+2. **It speaks the omens — and here the hallucination is wanted.** Prophecy that parses cleanly
+   isn't prophecy. Its confabulation, routed into portents, becomes the voice.
 
-It is **not** a knowledge base. It is **a trainable policy network that happens to speak.**
+It is not a knowledge base. It is **a trainable policy network that happens to speak.**
 
-## Non-negotiable invariants
+## Invariants — the safety case
 
-`test/invariants.mjs` runs 400 games, half of them against an *adversarial* god that emits
-garbage, steals other deities' verbs, and overspends. All of these must hold:
+`test/invariants.mjs` runs 400 games, half against an *adversarial* god that emits garbage,
+steals other deities' verbs, and overspends. All must hold:
 
-- Kel (war) can never be merciful — **personality lives in the action space, not the weights.**
-- Kel's favor is capped at −10. Hostility is structural. Guards against sycophantic drift.
-- Escalation streak ≤ 3, then Oss (mercy) is the *only* legal actor. Models escalate forever
-  unless a de-escalating actor is structurally guaranteed a turn.
-- Divine budget never negative; ledger is append-only.
-- Mercy rate > 15% or the game is unwinnable misery.
+- **Kel (war) can never be merciful.** Personality lives in the ACTION SPACE, not the weights —
+  a 50M model cannot hold a character across two calls, so we don't ask it to. Kel has no mercy
+  verb, therefore Kel cannot be merciful, no matter what the model says.
+- **Kel's favor is capped at −10.** Hostility is structural, unbuyable. Guards against the
+  sycophantic drift every LM has.
+- **Escalation streak ≤ 3**, then Oss (mercy) is the only legal actor. LMs escalate forever
+  unless a de-escalating actor is *structurally guaranteed* a turn.
+- Divine budget never negative. Ledger is append-only — the god's past commitments are fed back
+  into its prompt. That's how you get consistency from a model with no memory: **externalize it.**
+- Mercy rate > 15%, or the game is unwinnable misery.
 
-**If you change the pantheon, re-run `node test/invariants.mjs`.** It is the whole safety case.
+**Any change to the pantheon → re-run `node test/invariants.mjs`.** This test already caught one
+real bug (`desecrate` pushed tension to 126, unclamped when no god acted). It earns its keep.
 
-## Runbook
+## State of play
 
-```bash
-pip install -r train/requirements.txt
+Done and green:
 
-# 1. corpus. heuristic labels are Boltzmann over the anger oracle, NOT argmax —
-#    we want the model to learn a disposition, not a lookup table.
-python train/make_dataset.py --n 20000 --out data/god_bids.jsonl
-#    richer bids + omens (uses the 3060, ~20 min):
-python train/make_dataset.py --n 8000 --mode teacher --teacher Qwen/Qwen3-4B-Instruct-2507
+- `game/engine.js` — deterministic world, rules, arbiter, ledger. The model never touches truth.
+- `game/gods.js` — `HeuristicGod` (baseline, zero download) + `SupraGod` (transformers.js/WebGPU).
+- `game/index.html` — React + Tailwind, no build step (esm.sh + htm). Playable now.
+- `train/` — corpus gen, full SFT of Supra-50M-Base, ONNX q4 export. Sized for the 3060.
+- Tests pass: 3934 divine acts, 33.3% mercy rate, longest escalation run 3.
 
-# 2. full fine-tune. 51.8M bf16 — no LoRA, fits 12GB trivially, minutes not hours.
-python train/sft_god.py --data data/god_bids.jsonl --out ckpt/supra-god
-#    sanity probe at the end should print something like 'kel:raid', not prose.
+Open:
 
-# 3. browser build. Supra is Llama arch → Optimum exports cleanly. ~26MB at q4.
-python train/export_onnx.py --ckpt ckpt/supra-god --out ckpt/supra-god-onnx
-huggingface-cli upload <you>/supra-god-onnx ckpt/supra-god-onnx
+1. **The training run.** Luigi launched it on the 3060. Ask for the loss curve and the SFT sanity
+   probe. The probe must print something like `kel:raid`. If it prints prose, the format didn't
+   take — raise `--epochs` to 5.
+2. **`test/eval_god.mjs` does not exist yet.** It is the most important unwritten file. See below.
+3. **A pending judgment call:** the README leads with the Supra-50M critique, quoting its worst
+   outputs, because that failure *is* the design rationale. Luigi hasn't decided whether to soften
+   it. Don't change it unilaterally.
 
-# 4. verify
-node test/invariants.mjs
-```
+## The evaluation that decides whether any of this was worth it
 
-Then in `game/gods.js`, point `SupraGod` at your ONNX repo id.
+Heuristic labels in `make_dataset.py` are a **Boltzmann distribution over an anger oracle, not an
+argmax** (`/18.0` is the temperature). We are teaching a *disposition*, not a lookup table. Which
+sets up the only question worth asking:
 
-## If asked to improve it
+> **If the trained model exactly reproduces the anger oracle, you spent 26MB and a training run
+> to reimplement an `if` statement.**
 
-The interesting axes, roughly in order of payoff:
+Write `test/eval_god.mjs`: 200 games per backend, comparing —
 
-1. **Teacher-labelled omens.** The heuristic omens are hand-written and good; model omens are
-   stranger and better. Generate them with the teacher, train Supra to imitate.
-2. **Ledger conditioning.** The prompt includes the last 4 divine acts. Train on longer ledger
-   context so the god's past commitments actually constrain it — this is how you get
-   consistency out of a model with no memory: **externalize the memory.**
-3. **Distinct per-deity heads / prefixes.** Right now one model plays all four. Try a deity
-   token prefix so each has its own conditional distribution.
-4. **Do NOT** try to make it smarter. It will not get smarter. Make it *stranger, but bounded.*
+- **Deity spread.** Always picks Kel → broken; it learned that Kel is angriest on average and
+  stopped reading.
+- **Correlation between world digest and choice.** Is it reading the valley at all?
+- **KL between the model's bid distribution and the anger oracle's.** This is the number.
+  - `KL ≈ 0` → lookup table. **Delete the model.** This is the likeliest failure and the one
+    that's easiest to rationalize away. Don't.
+  - `KL` high, play incoherent → collapsed to a prior.
+  - `KL` moderate, choice still tracks world state → **that's the god.** The disagreement *is*
+    the product.
+
+If it lands in failure mode one: raise the Boltzmann temperature in `label_heuristic`, or switch
+to `--mode teacher` so labels come from something with actual opinions instead of arithmetic.
+
+## Standing instruction
+
+**Do not try to make the model smarter. It will not get smarter. Make it stranger, but bounded.**
 
 ## Layout
 
 ```
-game/engine.js       deterministic truth: world, rules, arbiter, ledger. Model never touches it.
-game/gods.js         HeuristicGod (baseline) + SupraGod (transformers.js, WebGPU).
-game/index.html      React + Tailwind, no build step (esm.sh + htm).
-train/               dataset gen, SFT, ONNX export.
-test/invariants.mjs  the safety case. Run it.
+game/engine.js        deterministic truth. The model never touches it.
+game/gods.js          HeuristicGod (baseline) + SupraGod (transformers.js / WebGPU).
+game/index.html       React + Tailwind, no build step.
+train/make_dataset.py world_digest → deity:verb corpus.
+train/sft_god.py      full fine-tune, 51.8M bf16, fits 12GB trivially. Minutes, not hours.
+train/export_onnx.py  → ONNX q4 (~26MB). Supra is Llama arch, so Optimum exports cleanly.
+test/invariants.mjs   the safety case. Run it.
 ```
 
-Open `game/index.html` with any static server (`python -m http.server`) — ES modules need HTTP,
-not `file://`.
+Serve the game over HTTP (`python3 -m http.server 8000` → `/game/index.html`); ES modules will
+not load from `file://`.
