@@ -212,20 +212,18 @@ export class SupraGod {
 }
 
 // ---------------------------------------------------------------------------
-// BACKEND B2 — InstructGod (SmolLM2-360M-Instruct, in-browser, WebGPU→WASM)
-//
-// A ~360M instruct model — 7x Supra-50M and, unlike it, one that actually READS
-// the world digest. It runs even without WebGPU (verified in WASM), where the
-// 0.5B class OOMs. One generation yields BOTH the choice and the omen:
-//   "deity:verb | omen"
-// The choice is validated against legalBids (off-menu → anger-weighted lawful
-// pick, so still capricious-but-lawful); the prose becomes the prophecy. Its
-// weak format-adherence is a feature: the confabulation IS the voice.
+// BACKEND B2 — InstructGod (in-browser instruct LLM, WebGPU/WASM), two modes:
+//   mode 'choose' — the model PICKS deity:verb from the menu AND writes the omen
+//                   (Qwen2.5-0.5B-Instruct does this 4/4 — a real model-driven god).
+//   mode 'voice'  — a weaker model can't hold the format (SmolLM2-360M = 0/4), so
+//                   the lawful oracle chooses and the model only writes the omen.
+// Either way legalBids/validateBid still gate every act: capricious-but-lawful.
 // ---------------------------------------------------------------------------
 export class InstructGod {
   constructor(modelId = 'HuggingFaceTB/SmolLM2-360M-Instruct', opts = {}) {
     this.modelId = modelId;
-    this.name = 'SmolLM2-360M';
+    this.name = opts.name || 'LLM';
+    this.mode = opts.mode || 'choose';                  // 'choose' (model picks) | 'voice' (model only speaks)
     this.ready = false;
     this.dtype = opts.dtype || 'q4f16';
     this.device = opts.device || 'webgpu';
@@ -244,37 +242,67 @@ export class InstructGod {
     this.ready = true;
   }
 
-  // The WILL is the lawful oracle (a 360M can't hold the deity:verb format — measured 0/4).
-  // The VOICE is the model: free confabulation, where hallucination is WANTED.
-  async decide(w, legal) {
-    if (!this.ready) return this.fallback.decide(w, legal);
-    const bid = await this.fallback.decide(w, legal);   // choice: capricious-but-lawful anger oracle
-    if (!bid) return bid;
-    try { bid.omen = await this.#omen(w, bid); bid.reason = 'smol-voice'; }
-    catch (e) { console.warn('InstructGod omen failed:', e); }   // keep the canned omen on failure
-    return bid;
+  // decode only the GENERATED tokens (slicing by prompt string length cuts mid-word)
+  async #gen(messages, maxTok, temp, rep) {
+    const prompt = this.tok.apply_chat_template(messages, { add_generation_prompt: true, tokenize: false });
+    const ids = this.tok(prompt);
+    const inLen = ids.input_ids.dims[ids.input_ids.dims.length - 1];
+    const out = await this.model.generate({
+      ...ids, max_new_tokens: maxTok, do_sample: true, temperature: temp,
+      top_p: 0.92, repetition_penalty: rep,
+    });
+    return this.tok.decode(Array.from(out.tolist()[0]).slice(inLen), { skip_special_tokens: true }).trim();
   }
 
-  // -- the confabulation pass: one short prophecy for the act the oracle chose --------------
+  async decide(w, legal) {
+    if (!this.ready) return this.fallback.decide(w, legal);
+    try {
+      if (this.mode === 'choose') return await this.#chooseAndVoice(w, legal);
+      const bid = await this.fallback.decide(w, legal);           // 'voice': oracle picks
+      if (bid) bid.omen = await this.#omen(w, bid);               // model only speaks
+      return bid;
+    } catch (e) { console.warn('InstructGod failed, falling back:', e); return this.fallback.decide(w, legal); }
+  }
+
+  // 'choose': the model reads the world, picks one act from the menu, and speaks its omen
+  async #chooseAndVoice(w, legal) {
+    const menu = [...new Set(legal.map((b) => `${b.deity}:${b.verb}`))];
+    const tail = await this.#gen([
+      { role: 'system', content: 'You are the capricious pantheon of four gods — Vurm (water, drought), Kel (war), Oss (mercy), Ithra (judgement) — acting upon a small failing valley. From the MENU pick exactly one act, then utter a single short cryptic omen. Answer EXACTLY as: deity:verb | omen' },
+      { role: 'user', content: 'The valley now: the well is fouled, tension high.\nMENU: kel:raid, oss:mend\nYour act:' },
+      { role: 'assistant', content: 'kel:raid | Smoke stains the dawn; the ridge has found its appetite.' },
+      { role: 'user', content: `The valley now:\n${digest(w)}\nMENU: ${menu.join(', ')}\nYour act:` },
+    ], 46, this.temperature, 1.1);
+    const m = tail.match(/([a-z]+)\s*:\s*([a-z_]+)\s*[|\-–—:]*\s*(.*)/i);
+    let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
+    const reason = chosen ? this.name : 'prior';
+    if (!chosen) {                                     // off-menu → anger-weighted lawful pick
+      const rank = ranking(w).filter((r) => legal.some((b) => b.deity === r.deity));
+      const pk = (Math.random() < 0.75 ? rank[0] : (rank[1] || rank[0]));
+      const opts = legal.filter((b) => b.deity === pk.deity);
+      chosen = opts[Math.floor(Math.random() * opts.length)];
+    }
+    let omen = (m && m[3]) ? m[3] : tail.replace(/^[a-z]+\s*:\s*[a-z_]+\s*[|\-–—:]*/i, '');
+    omen = (omen || '').split('\n')[0].replace(/["]/g, '').trim();
+    const letters = (omen.match(/[a-z]/gi) || []).length;
+    if (omen.length < 10 || letters < omen.length * 0.6) omen = pick(OMENS[chosen.verb], Math.random);
+    return { deity: chosen.deity, verb: chosen.verb, target: null, reason, omen: omen.slice(0, 160) };
+  }
+
+  // 'voice': one short prophecy for the act the oracle chose (hallucination wanted)
   async #omen(w, bid) {
     const g = PANTHEON[bid.deity];
     const ctx = `water ${w.village.water}, morale ${w.village.morale}, tension ${w.tension}`;
-    const prompt = this.tok.apply_chat_template([
+    let text = await this.#gen([
       { role: 'system', content: 'You are a doom-prophet of a dying valley. When a god acts, you speak ONE short, cryptic, ominous sentence of prophecy — vivid and strange. Reply with only that sentence.' },
       { role: 'user', content: 'The god of war sends raiders down from the ridge.' },
       { role: 'assistant', content: 'Smoke stains the dawn, and the ridge has found its appetite.' },
       { role: 'user', content: `${g.name}, ${g.epithet || 'the unseen'}, works "${bid.verb}" upon the valley (${ctx}).` },
-    ], { add_generation_prompt: true, tokenize: false });
-    const ids = this.tok(prompt);
-    const inLen = ids.input_ids.dims[ids.input_ids.dims.length - 1];   // slice by TOKEN count, not string length
-    const out = await this.model.generate({
-      ...ids, max_new_tokens: 32, do_sample: true, temperature: this.temperature, top_p: 0.92, repetition_penalty: 1.3,
-    });
-    let text = this.tok.decode(Array.from(out.tolist()[0]).slice(inLen), { skip_special_tokens: true }).trim();
+    ], 32, this.temperature, 1.3);
     text = text.split('\n')[0].replace(/^["'\s]+|["'\s]+$/g, '').trim();
     const cut = text.lastIndexOf('.'); if (cut > 12) text = text.slice(0, cut + 1);
     const letters = (text.match(/[a-z]/gi) || []).length;
-    if (text.length < 12 || letters < text.length * 0.6) return pick(OMENS[bid.verb], Math.random);  // garbled → canned
+    if (text.length < 12 || letters < text.length * 0.6) return pick(OMENS[bid.verb], Math.random);
     return text.slice(0, 160);
   }
 }
