@@ -150,11 +150,22 @@ function animate(){
   const camPos = hero.position.clone().addScaledVector(fwd, -30).add(new THREE.Vector3(0, 22, 0));
   camera.position.lerp(camPos, 0.09);
   camera.lookAt(hero.position.x, 6, hero.position.z);
-  // villagers wander (autonomous AI-action agents — same policy idea as the gods)
+  // villagers as autonomous agents: a condition→action policy over the same world
+  // the gods read — flee the ridge when war boils, seek the well when it thirsts,
+  // else keep to home. Same "generate a lawful action from state" idea as the god.
+  const flee = w.tension > 60, thirst = w.village.water <= 3;
   for (const vlg of villagers) {
-    if (!vlg.tgt || vlg.mesh.position.distanceTo(vlg.tgt) < 1.5) vlg.tgt = new THREE.Vector3(8 + (Math.sin(clock.elapsedTime*1.3+vlg.seed)*10), 0, 8 + (Math.cos(clock.elapsedTime*0.9+vlg.seed*2)*10));
+    const mood = flee ? 'flee' : thirst ? 'thirst' : 'home';
+    if (mood !== vlg.mood || !vlg.tgt || vlg.mesh.position.distanceTo(vlg.tgt) < 1.5) {
+      vlg.mood = mood;
+      if (flee)        vlg.tgt = new THREE.Vector3(8 + (Math.random()*24-12), 0, 42 + Math.random()*22);            // south, away from Kel's ridge
+      else if (thirst) vlg.tgt = new THREE.Vector3(-55 + (Math.random()*10-5), 0, 12 + (Math.random()*10-5));       // to the well
+      else             vlg.tgt = new THREE.Vector3(8 + Math.sin(clock.elapsedTime*1.3+vlg.seed)*10, 0, 8 + Math.cos(clock.elapsedTime*0.9+vlg.seed*2)*10);
+    }
+    const spd = flee ? 15 : thirst ? 9 : 6.5;
     const dir = vlg.tgt.clone().sub(vlg.mesh.position); dir.y = 0; const d = dir.length();
-    if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, 7*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
+    if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, spd*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
+    vlg.mesh.children[0].material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
   }
   // tension → ember light + sky tint
   const t=w.tension/100; ember.intensity=t*2.4; scene.fog.color.setRGB(0.06+t*0.22,0.04,0.04); sky.material.uniforms.bot.value.setRGB(0.22+t*0.4,0.1,0.09);
