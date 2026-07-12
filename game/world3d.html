@@ -89,6 +89,31 @@ const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.3,2.4,4,8), new THREE.Me
 const head = new THREE.Mesh(new THREE.SphereGeometry(1.1,12,12), new THREE.MeshStandardMaterial({color:0xe7dcc4})); head.position.y=4.6; hero.add(head);
 hero.position.set(8,0,8); scene.add(hero);
 
+// ---- villagers: small autonomous agents wandering Aldermere ----
+const villagers = [];
+for (let i=0;i<5;i++){
+  const m = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.7,1.4,3,6), new THREE.MeshStandardMaterial({color:0x6b5a45})); b.position.y=1.4; m.add(b);
+  const h = new THREE.Mesh(new THREE.SphereGeometry(0.6,8,8), new THREE.MeshStandardMaterial({color:0xc9b28f})); h.position.y=2.6; m.add(h);
+  m.position.set(8 + (Math.random()*12-6), 0, 8 + (Math.random()*12-6)); scene.add(m);
+  villagers.push({ mesh:m, tgt:null, seed:Math.random()*6.28 });
+}
+
+// ---- western forest (instanced-ish cones) ----
+for (let i=0;i<40;i++){
+  const t = new THREE.Mesh(new THREE.ConeGeometry(1.6+Math.random(), 5+Math.random()*3, 6), new THREE.MeshStandardMaterial({color:0x16281a, roughness:1}));
+  t.position.set(-95+Math.random()*30, 3, 20+Math.random()*70); scene.add(t);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,2), new THREE.MeshStandardMaterial({color:0x2a1c12})); trunk.position.set(t.position.x,1,t.position.z); scene.add(trunk);
+}
+
+// ---- dusk sky dome ----
+const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: { top:{value:new THREE.Color(0x1a1533)}, bot:{value:new THREE.Color(0x3a1a18)} },
+  vertexShader: 'varying vec3 vp; void main(){ vp=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'varying vec3 vp; uniform vec3 top; uniform vec3 bot; void main(){ float h=clamp(normalize(vp).y*0.7+0.3,0.0,1.0); gl_FragColor=vec4(mix(bot,top,h),1.0); }',
+})); scene.add(sky); sky.material.uniforms;
+
 // ---- input ----
 const keys = new Set();
 addEventListener('keydown', e=>{ const k=e.key.toLowerCase();
@@ -120,11 +145,19 @@ function animate(){
     if(dx||dz){ const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
   // camera follows (behind + above)
-  const camTarget = new THREE.Vector3(hero.position.x, 5, hero.position.z);
-  camera.position.lerp(new THREE.Vector3(hero.position.x, 30, hero.position.z+42), 0.08);
-  camera.lookAt(camTarget);
+  // third-person follow: trail behind the hero's facing
+  const fwd = new THREE.Vector3(Math.sin(hero.rotation.y), 0, Math.cos(hero.rotation.y));
+  const camPos = hero.position.clone().addScaledVector(fwd, -30).add(new THREE.Vector3(0, 22, 0));
+  camera.position.lerp(camPos, 0.09);
+  camera.lookAt(hero.position.x, 6, hero.position.z);
+  // villagers wander (autonomous AI-action agents — same policy idea as the gods)
+  for (const vlg of villagers) {
+    if (!vlg.tgt || vlg.mesh.position.distanceTo(vlg.tgt) < 1.5) vlg.tgt = new THREE.Vector3(8 + (Math.sin(clock.elapsedTime*1.3+vlg.seed)*10), 0, 8 + (Math.cos(clock.elapsedTime*0.9+vlg.seed*2)*10));
+    const dir = vlg.tgt.clone().sub(vlg.mesh.position); dir.y = 0; const d = dir.length();
+    if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, 7*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
+  }
   // tension → ember light + sky tint
-  const t=w.tension/100; ember.intensity=t*2.2; scene.fog.color.setRGB(0.047+t*0.25,0.04,0.035); scene.background=scene.fog.color;
+  const t=w.tension/100; ember.intensity=t*2.4; scene.fog.color.setRGB(0.06+t*0.22,0.04,0.04); sky.material.uniforms.bot.value.setRGB(0.22+t*0.4,0.1,0.09);
   // billboards glow by wrath; ridge fires; well colour
   const anger=Object.fromEntries(ranking(w).map(r=>[r.deity,r.anger])); const maxA=Math.max(1,...Object.values(anger).map(Math.abs));
   for(const [id,s] of Object.entries(SITES)){ if(s.glow){ s.glow.intensity=0.4+1.6*THREE.MathUtils.clamp(anger[s.deity]/maxA,0,1); } if(s.deity&&billboards[id]) billboards[id].position.y=16+Math.sin(clock.elapsedTime*1.5+id.length)*0.6; }
