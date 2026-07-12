@@ -116,48 +116,66 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.Shad
   fragmentShader: 'varying vec3 vp; uniform vec3 top; uniform vec3 bot; void main(){ float h=clamp(normalize(vp).y*0.7+0.3,0.0,1.0); gl_FragColor=vec4(mix(bot,top,h),1.0); }',
 })); scene.add(sky);
 
-// ---- encounters: a real-time skirmish IN the 3D world (explore → combat) ----
-let encounter = null, heroFlash = 0, heroHp = 100; const heroMax = 100;
-const powCd = { mend: 0, flood: 0 };
-function castMend(){ if(!encounter||powCd.mend>0) return; powCd.mend=13; encounter.integrity=Math.min(100,encounter.integrity+30); heroHp=Math.min(heroMax,heroHp+40); fx3('#34d399'); }
-function castFlood(){ if(!encounter||powCd.flood>0) return; powCd.flood=11; for(const r of encounter.raiders) r.slow=4; fx3('#f59e0b'); }
-let fxT=0, fxC='#fff'; function fx3(c){ fxT=0.35; fxC=c; }
-const raiderMat = () => new THREE.MeshStandardMaterial({ color:0xfb7185, emissive:0x3a0d0d });
-function makeRaider(x,z){ const m=new THREE.Group();
-  const b=new THREE.Mesh(new THREE.CapsuleGeometry(0.9,1.8,3,6), raiderMat()); b.position.y=1.7; m.add(b);
-  const h=new THREE.Mesh(new THREE.SphereGeometry(0.7,8,8), raiderMat()); h.position.y=3.4; m.add(h);
-  m.position.set(x,0,z); scene.add(m); return { mesh:m, hp:30, cool:0, slow:0, dying:0 }; }
-function startEncounter(){
-  const n = 3 + Math.floor(w.bandits.strength*0.8), rp=SITES.ridge.pos, raiders=[];
-  for(let i=0;i<n;i++) raiders.push(makeRaider(rp[0]-8+i*4+Math.random()*4, rp[2]+6+Math.random()*6));
-  encounter = { raiders, integrity:100 }; heroHp = heroMax; powCd.mend = 0; powCd.flood = 0;
-  omen = { text:'Smoke on the ridge — they come down. Defend the vale! (walk in, press SPACE to strike)', turn:w.turn }; pending=null; shrineMenu=false;
-}
-function endEncounter(win){
-  for(const r of encounter.raiders) if(r.mesh.parent) scene.remove(r.mesh);
-  if(win){ w.bandits.strength=Math.max(0,w.bandits.strength-2); w.tension=Math.max(0,w.tension-28); omen={text:'The ridge falls quiet. You held them.',turn:w.turn}; }
-  else { w.village.pop=Math.max(0,w.village.pop-2); w.village.morale=Math.max(0,w.village.morale-15); w.tension=Math.min(100,w.tension+12); omen={text:'They broke into the vale. Some will not be counted again.',turn:w.turn}; if(w.village.pop<=0){ w.over=true; w.won=false; } }
-  encounter=null;
-}
-function heroStrike(){ if(!encounter) return; let best=null,bd=1e9;
-  for(const r of encounter.raiders){ if(r.hp<=0||r.dying)continue; const d=hero.position.distanceTo(r.mesh.position); if(d<8&&d<bd){bd=d;best=r;} }
-  if(best){ best.hp-=20; best.hitFlash=0.15; heroFlash=0.16;
-    const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.2);
-    if(best.hp<=0) best.dying=0.4; } }
-function updateEncounter(dt){ const e=encounter, vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
-  powCd.mend=Math.max(0,powCd.mend-dt); powCd.flood=Math.max(0,powCd.flood-dt);
-  for(const r of e.raiders){
-    if(r.dying){ r.dying-=dt; r.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(r.dying<=0&&r.mesh.parent) scene.remove(r.mesh); continue; }
-    r.mesh.children.forEach(c=>c.material.emissive.setHex(r.hitFlash>0?0xffffff:0x3a0d0d)); if(r.hitFlash>0) r.hitFlash-=dt;
-    if(r.slow>0) r.slow-=dt;
-    const dh=hero.position.distanceTo(r.mesh.position), tgt = dh<9 ? hero.position : vc;
-    const dir=new THREE.Vector3(tgt.x-r.mesh.position.x,0,tgt.z-r.mesh.position.z), d=dir.length();
-    if(d>4){ dir.normalize(); r.mesh.position.addScaledVector(dir,(r.slow>0?4:11)*dt); r.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
-    else { r.cool-=dt; if(r.cool<=0){ r.cool=1; if(tgt===hero.position){ heroHp-=8; heroFlash=0.16; } else e.integrity-=6; } }
+// ---- ARPG combat: roaming enemies, attacks, god-power skillbar, XP, loot ----
+let heroHp = 100, heroMax = 100, heroDmg = 16, heroFlash = 0, invuln = 0;
+let level = 1, xp = 0, points = 1, deaths = 0, fury = 0;
+let mana = 60, manaMax = 60, showTree = false, castCd = {};
+let enemies = [], loot = [], spawnT = 4;
+let fxT = 0, fxC = '#fff'; function fx3(c){ fxT = 0.3; fxC = c; }
+const xpNext = () => 20 + (level - 1) * 18;
+const GODC = { vurm:'#f59e0b', kel:'#fb7185', oss:'#34d399', ithra:'#a78bfa' };
+const POWERS = {
+  mend:  { god:'oss',   name:'Mend',  key:'Q', cost:20, cd:8,  pts:1, desc:'heal 45',           cast:()=>{ heroHp=Math.min(heroMax,heroHp+45); fx3('#34d399'); } },
+  flood: { god:'vurm',  name:'Flood', key:'R', cost:24, cd:11, pts:1, desc:'slow all foes 4s',  cast:()=>{ enemies.forEach(e=>e.slow=4); fx3('#f59e0b'); } },
+  smite: { god:'ithra', name:'Smite', key:'F', cost:26, cd:9,  pts:2, desc:'blast nearby foes', cast:()=>{ enemies.forEach(e=>{ if(!e.dying&&hero.position.distanceTo(e.mesh.position)<18){ e.hp-=48; e.hit=0.15; } }); fx3('#a78bfa'); } },
+  fury:  { god:'kel',   name:'Fury',  key:'V', cost:22, cd:14, pts:2, desc:'+60% damage 8s',    cast:()=>{ fury=8; fx3('#fb7185'); } },
+};
+const POWER_KEYS = Object.keys(POWERS);
+let unlocked = new Set(['mend']);
+const KEYMAP = { q:'mend', r:'flood', f:'smite', v:'fury' };
+function unlock(key){ const pw=POWERS[key]; if(pw && points>=pw.pts && !unlocked.has(key)){ points-=pw.pts; unlocked.add(key); } }
+function cast(key){ const pw=POWERS[key]; if(!pw||!unlocked.has(key)||(castCd[key]||0)>0||mana<pw.cost||w.over) return; mana-=pw.cost; castCd[key]=pw.cd; pw.cast(); }
+window.unlock = unlock; window.cast = cast;
+
+function enemyMesh(x,z){ const m=new THREE.Group();
+  const mat=()=>new THREE.MeshStandardMaterial({ color:0xfb7185, emissive:0x3a0d0d });
+  const b=new THREE.Mesh(new THREE.CapsuleGeometry(0.9,1.8,3,6), mat()); b.position.y=1.7; m.add(b);
+  const h=new THREE.Mesh(new THREE.SphereGeometry(0.7,8,8), mat()); h.position.y=3.4; m.add(h);
+  m.position.set(x,0,z); scene.add(m); return m; }
+function spawnEnemy(){ const rp=SITES.ridge.pos, a=Math.random()*6.28;
+  enemies.push({ mesh:enemyMesh(rp[0]+Math.cos(a)*20, rp[2]+Math.abs(Math.sin(a))*14), hp:26+level*4, dmg:7, cool:0, slow:0, dying:0, hit:0, dead:false }); }
+function gainXp(n){ xp+=n; while(xp>=xpNext()){ xp-=xpNext(); level++; heroMax+=18; heroHp=heroMax; heroDmg+=3; points++; fx3('#e7e5e4'); } }
+function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
+  const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:0xa78bfa, emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
+  const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind }); }
+function heroAttack(){ if(w.over) return; let best=null,bd=1e9;
+  for(const e of enemies){ if(e.hp<=0||e.dying)continue; const d=hero.position.distanceTo(e.mesh.position); if(d<9&&d<bd){bd=d;best=e;} }
+  if(best){ best.hp-=heroDmg*(fury>0?1.6:1); best.hit=0.15; heroFlash=0.16;
+    const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.3); } }
+function updateCombat(dt){
+  // spawn pressure scales with bandit strength (and your level)
+  spawnT-=dt;
+  if(spawnT<=0 && enemies.filter(e=>!e.dying).length < 4+Math.floor(w.bandits.strength)){ spawnEnemy(); spawnT=Math.max(2.2, 7 - w.bandits.strength*0.4 - level*0.15); }
+  mana=Math.min(manaMax,mana+dt*7); if(fury>0)fury-=dt; if(invuln>0)invuln-=dt;
+  for(const k in castCd) if(castCd[k]>0) castCd[k]-=dt;
+  const clear = enemies.every(e=>e.dying || hero.position.distanceTo(e.mesh.position)>16);
+  if(heroHp<heroMax && clear) heroHp=Math.min(heroMax,heroHp+7*dt);
+  const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
+  for(const e of enemies){
+    if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(6+level*2); if(Math.random()<0.45) dropLoot(e.mesh.position); }
+    if(e.dying){ e.dying-=dt; e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
+    e.mesh.children.forEach(c=>c.material.emissive.setHex(e.hit>0?0xffffff:0x3a0d0d)); if(e.hit>0)e.hit-=dt; if(e.slow>0)e.slow-=dt;
+    const dh=hero.position.distanceTo(e.mesh.position), tgt = dh<26 ? hero.position : vc;
+    const dir=new THREE.Vector3(tgt.x-e.mesh.position.x,0,tgt.z-e.mesh.position.z), d=dir.length();
+    if(d>3.5){ dir.normalize(); e.mesh.position.addScaledVector(dir,(e.slow>0?4:10)*dt); e.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
+    else { e.cool-=dt; if(e.cool<=0){ e.cool=1; if(tgt===hero.position){ if(invuln<=0){ heroHp-=e.dmg; heroFlash=0.16; } } else { w.village.morale=Math.max(0,w.village.morale-1); w.tension=Math.min(100,w.tension+0.5); } } }
   }
-  e.raiders=e.raiders.filter(r=>r.hp>0 || r.dying>0);
-  const alive=e.raiders.filter(r=>r.hp>0).length;
-  if(alive===0) endEncounter(true); else if(e.integrity<=0 || heroHp<=0) endEncounter(false);
+  enemies = enemies.filter(e=>!e.dead);
+  // loot: bob, spin, auto-collect on touch
+  for(let i=loot.length-1;i>=0;i--){ const L=loot[i]; L.mesh.rotation.y+=dt*2.5; L.mesh.position.y=1.5+Math.sin(clock.elapsedTime*3+i)*0.3;
+    if(hero.position.distanceTo(L.mesh.position)<3.2){ if(L.kind==='grain'){ w.village.food+=4; } else { heroMax+=6; heroHp+=6; } scene.remove(L.mesh); loot.splice(i,1); fx3(L.kind==='grain'?'#f59e0b':'#a78bfa'); } }
+  // death → respawn at the village with brief mercy
+  if(heroHp<=0){ heroHp=heroMax; invuln=2.5; deaths++; hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]); w.village.morale=Math.max(0,w.village.morale-8); fx3('#7f1d1d'); }
 }
 
 // ---- input ----
@@ -165,21 +183,28 @@ const keys = new Set();
 addEventListener('keydown', e=>{ const k=e.key.toLowerCase();
   if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){keys.add(k);e.preventDefault();}
   if(k==='e') interact();
-  if(k===' '){ heroStrike(); e.preventDefault(); }
-  if(k==='q') castMend(); if(k==='f') castFlood();
+  if(k===' '){ heroAttack(); e.preventDefault(); }
+  if(KEYMAP[k]) cast(KEYMAP[k]);                 // Q/R/F/V → god-powers
+  if(k==='c') showTree = !showTree;              // Covenant board
   if(['1','2','3','4'].includes(k)){ if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
-  if(k==='r'&&w.over) restart();
+  if(k==='x'&&w.over) restart();                 // (R is a power key now)
 });
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
-function interact(){ if(w.over||encounter) return; const n=nearest(); if(!n) return;
-  if(n.id==='ridge' && w.tension>55){ startEncounter(); return; }   // war on the ridge → skirmish
+function interact(){ if(w.over) return; const n=nearest(); if(!n) return;
   if(n.s.shrine){shrineMenu=true;return;} doAct(n.s.act); }
 function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_IDS[i]}); }
 function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity); }   // instant — no turn taken
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; reads.push({correct:guess===pending.actual}); pending={...pending,result:{guess,correct:guess===pending.actual}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
-function restart(){ w=newWorld(); reads=[]; omen=null; pending=null; day=1; dayT=0; divPool=0; }
+function restart(){
+  for(const e of enemies) if(e.mesh.parent) scene.remove(e.mesh);
+  for(const L of loot) if(L.mesh.parent) scene.remove(L.mesh);
+  w=newWorld(); reads=[]; omen=null; pending=null; day=1; dayT=0; divPool=0;
+  enemies=[]; loot=[]; heroHp=100; heroMax=100; heroDmg=16; level=1; xp=0; points=1; deaths=0; fury=0;
+  mana=60; manaMax=60; unlocked=new Set(['mend']); castCd={}; spawnT=4; invuln=0; showTree=false;
+  hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
+}
 window.__acc=accuse; window.restart=restart;
 
 // ---- loop ----
@@ -188,7 +213,7 @@ function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
   // real-time flow: time passes and the gods act on their own — no turns taken
-  if(!w.over && !encounter){
+  if(!w.over){
     dayT += dt;
     if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ w.over = true; w.won = false; } }
     divPool += dt * (0.5 + w.tension * 0.02);
@@ -201,7 +226,7 @@ function animate(){
     if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
     if(dx||dz){ const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
-  if(encounter) updateEncounter(dt); else if(heroHp<heroMax) heroHp=Math.min(heroMax,heroHp+8*dt);
+  if(!w.over) updateCombat(dt);
   if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
   // camera follows (behind + above)
@@ -243,32 +268,50 @@ function animate(){
 // ---- HUD (DOM) ----
 const ui=document.getElementById('ui');
 ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame innerHTML rebuilds
-  const el = e.target.closest('[data-act]'); if (!el) return;
+  const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const [cmd, arg] = el.dataset.act.split(':');
-  if (cmd === 'acc') accuse(+arg); else if (cmd === 'restart') restart();
+  if (cmd === 'acc') accuse(+arg);
+  else if (cmd === 'restart') restart();
+  else if (cmd === 'cast') cast(arg);
+  else if (cmd === 'unlock') unlock(arg);
+  else if (cmd === 'tree' || cmd === 'closetree') showTree = (cmd === 'tree');
 });
 function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.correct).length;
+  const hpPct=Math.max(0,heroHp)/heroMax*100, mnPct=mana/manaMax*100, xpPct=xp/xpNext()*100, foes=enemies.filter(e=>!e.dying).length;
+  const skill = POWER_KEYS.map(k=>{ const pw=POWERS[k], has=unlocked.has(k), cd=castCd[k]||0, ready=has&&cd<=0&&mana>=pw.cost;
+    return `<button data-act="${has?('cast:'+k):''}" ${has&&ready?'':'disabled'} class="pointer-events-auto text-center ${has?'':'opacity-30'}" title="${pw.name}: ${pw.desc}">
+      <div class="w-11 h-11 rounded border grid place-items-center relative ${ready?'':'opacity-50'}" style="border-color:${GODC[pw.god]}66;color:${GODC[pw.god]}"><span class="mono text-[10px] font-bold">${pw.key}</span>${cd>0?`<span class="absolute inset-0 grid place-items-center bg-black/65 rounded mono text-[10px] text-stone-200">${cd.toFixed(0)}</span>`:''}</div>
+      <div class="mono text-[7px] text-stone-500 mt-0.5">${has?pw.name:'locked'}</div></button>`; }).join('');
+  const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="closetree"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" data-act="stop"><div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Covenant</h2><span class="mono text-xs text-amber-300">${points} point${points!==1?'s':''}</span></div><div class="grid grid-cols-4 gap-3">${POWER_KEYS.map(k=>{const pw=POWERS[k],has=unlocked.has(k);return `<div class="border border-stone-800 rounded p-3 text-center"><div class="serif text-sm" style="color:${GODC[pw.god]}">${pw.name}${has?' ✓':''}</div><div class="mono text-[8px] text-stone-600 my-1">${pw.desc}<br/>${pw.cost} mana · [${pw.key}]</div>${has?'':`<button data-act="unlock:${k}" ${points>=pw.pts?'':'disabled'} class="mono text-[9px] px-2 py-0.5 rounded border ${points>=pw.pts?'border-stone-500 text-stone-200 hover:bg-stone-800':'border-stone-800 text-stone-600'}">unlock · ${pw.pts}pt</button>`}</div>`;}).join('')}</div><p class="serif italic text-stone-500 text-xs mt-4">Slay Kel's raiders for XP; each level grants a Covenant point. Unlock a god's power, wield it with its key.</p><button data-act="closetree" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (C)</button></div></div>` : '';
   ui.innerHTML=`
    <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
-     <div class="flex gap-5 items-baseline">
-       <span class="serif text-xl text-stone-100 tracking-widest">THEODICY <span class="text-stone-500 text-sm">· the vale in 3D</span></span>
-       <span class="mono text-xs">day <span class="text-stone-200">${day}</span></span>
-       <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water} · morale ${v.morale}</span>
+     <div class="flex gap-3.5 items-center flex-wrap">
+       <span class="serif text-xl text-stone-100 tracking-widest">THEODICY</span>
+       <span class="mono text-xs text-stone-200">Lv ${level}</span>
+       <span class="mono text-[10px] text-rose-300">HP</span><span class="inline-block w-24 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-rose-500" style="width:${hpPct}%"></span></span>
+       <span class="mono text-[10px] text-sky-400">MP</span><span class="inline-block w-16 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-sky-500" style="width:${mnPct}%"></span></span>
+       <span class="mono text-[10px] text-amber-300">XP</span><span class="inline-block w-14 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-amber-500" style="width:${xpPct}%"></span></span>
+       <span class="mono text-xs text-stone-500">day ${day}</span>
+       <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water}</span>
        <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${w.tension}</span>
        <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
      </div>
-     <div class="flex gap-3 pointer-events-auto"><a href="./explore.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a><a href="./index.html" class="mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">board ▸</a></div>
+     <a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a>
    </div>
    ${fxT>0?`<div class="absolute inset-0" style="background:${fxC};opacity:${(fxT*0.4).toFixed(2)}"></div>`:''}
-   ${encounter?`<div class="absolute top-16 left-1/2 -translate-x-1/2 text-center">
-       <div class="mono text-xs px-3 py-1.5 rounded-full bg-rose-950/85 border border-rose-800 text-rose-200 inline-block">⚔ raiders ${encounter.raiders.filter(r=>r.hp>0).length} · vale ${Math.max(0,encounter.integrity)|0}% · health ${Math.max(0,heroHp)|0}</div>
-       <div class="mono text-[10px] text-stone-400 mt-1">SPACE strike · <b class="text-emerald-300">Q</b> Mend${powCd.mend>0?` (${powCd.mend.toFixed(0)}s)`:''} · <b class="text-amber-300">F</b> Flood${powCd.flood>0?` (${powCd.flood.toFixed(0)}s)`:''}</div>
-     </div>`:''}
+   ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
+   ${invuln>0&&!w.over?`<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 serif italic text-rose-300 text-2xl">You fell. You rise again at Aldermere.</div>`:''}
+   ${!w.over?`<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-end gap-3">
+     <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ Covenant${points?` (${points})`:''}</button>
+     <div class="flex gap-2">${skill}</div>
+     <span class="mono text-[9px] text-stone-500 self-center leading-tight">SPACE attack<br/>C covenant</span>
+   </div>`:''}
+   ${tree}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
    ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
    ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">WASD / arrows to walk · approach a place and press E</div>`:''}
    ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? 1–4</span>${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ it was '+PANTHEON[pending.actual].name.split(',')[0]}</p>`:''}</div></div>`:''}
-   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">The vale is empty.</p><p class="serif italic text-stone-400 mt-2">It endured ${day} days. You read ${correct}/${reads.length} of their hands.</p><button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">walk again ▸ (R)</button></div></div>`:''}`;
+   ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/75 pointer-events-auto"><div class="text-center"><p class="serif text-4xl ${w.won?'text-emerald-300':'text-rose-300'}">The vale is empty.</p><p class="serif italic text-stone-400 mt-2">You reached level ${level}, fell ${deaths} times, and read ${correct}/${reads.length} of their hands over ${day} days.</p><button data-act="restart" class="mt-4 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">rise again ▸ (X)</button></div></div>`:''}`;
 }
 animate();
 </script>
