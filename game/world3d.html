@@ -381,7 +381,7 @@ function npcLine(n){                                      // the world remembers
   if(covenant && n.say.covenant) return n.say.covenant(covenant);
   if(n.id==='bran' && rival.stage>=2 && n.say.kaineKnown) return n.say.kaineKnown;
   if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
-function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } n._topic=null; n._aside=''; npcMenu=n; }
+function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`${t('Charge taken —')} ${n.name}: ${t(n.quest.desc)}`; toastT=3.5; } n._topic=null; n._aside=''; npcMenu=n; }
 function askAside(n, line){                              // the awakened model riffs ONE grounded sentence onto an authored line — never invents on its own
   if(godBackend!=='supra' || !god.npcAside) return;
   const topicAtCall=n._topic;
@@ -394,13 +394,13 @@ function pickChoice(n, tid, ci){ const t=(n.topics||[]).find(x=>x.id===tid); if(
   n._aside='';
   if(!n.asked.includes(tid)){ n.asked.push(tid); if(c.effect) c.effect(n); n.trust=Math.min(10,n.trust+(c.trust??1)); n._results=n._results||{}; n._results[tid]=c.result; askAside(n, c.result); } }
 function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
-  toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
+  toast=`${n.name} — ${t('charge fulfilled, the vale takes heart.')}`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
 function npcOf(kind){ return NPCS.find(n=>n.alive && n.state==='active' && n.quest.kind===kind); }
 function killNPC(){ const doomed=NPCS.filter(n=>n.alive); if(!doomed.length) return;
   doomed.sort((a,b)=> (a.state==='done'?1:0)-(b.state==='done'?1:0));   // the unhelped fall first
   const n=doomed[0]; n.alive=false; if(n.mesh&&n.mesh.parent) scene.remove(n.mesh); if(npcMenu&&npcMenu.id===n.id) npcMenu=null;
   const pi=party.indexOf(n); if(pi>=0) party.splice(pi,1);   // a fallen ally leaves the party
-  lostFolk.push(n.name); w.village.morale=Math.max(0,w.village.morale-4); toast=`${n.name} is lost to the vale.`; toastT=4; AUDIO.sfx.death(); }
+  lostFolk.push(n.name); w.village.morale=Math.max(0,w.village.morale-4); toast=`${n.name} — ${t('lost to the vale.')}`; toastT=4; AUDIO.sfx.death(); }
 
 // ---- THE PARTY: fulfil a folk's charge and they take up arms — each with a god-themed role ----
 const party = [];
@@ -418,7 +418,7 @@ function rescaleParty(){                              // called on hero level-up
   for(const n of party){ if(!n.alive) continue; const frac = n.maxHp>0 ? n.hp/n.maxHp : 1;
     n.maxHp = allyMaxHp(n.id); n.hp = Math.round(n.maxHp*frac); } }
 function recruit(n){ if(n.ally) return; n.ally=true; n.maxHp=allyMaxHp(n.id); n.hp=n.maxHp; n.downed=0; n.cd=ALLY[n.id].cd; n.level=Math.max(1,level); party.push(n);
-  toast=`${n.name} takes up arms at your side (Lv ${n.level}).`; toastT=3.5; }
+  toast=`${n.name} ${t('takes up arms at your side')} (Lv ${n.level}).`; toastT=3.5; }
 function nearestEnemyTo(x,z,maxD){ let best=null,bd=maxD*maxD; for(const e of enemies){ if(e.dying||e.hp<=0)continue; const dx=e.mesh.position.x-x,dz=e.mesh.position.z-z,dd=dx*dx+dz*dz; if(dd<bd){bd=dd;best=e;} } return best; }
 function updateParty(dt){
   const foes = enemies.filter(e=>!e.dying&&e.hp>0);
@@ -443,7 +443,7 @@ function updateParty(dt){
       else if(a.role==='douse'){ let hit=false; for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z)<20){ e.slow=3; hit=true; } } heroHp=Math.min(heroMax,heroHp+Math.round(6*healScale)); n.cd = hit?a.cd:1; }
     }
     for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z) < e.r+2.2){ n.hp -= e.dmg*0.5*dt; } }   // chip damage
-    if(n.hp<=0){ n.hp=0; n.downed=relicHas('reviveHalf')?4:8; toast=`${n.name} is downed!`; toastT=2; AUDIO.sfx.hit(); }
+    if(n.hp<=0){ n.hp=0; n.downed=relicHas('reviveHalf')?4:8; toast=`${n.name} — ${t('downed!')}`; toastT=2; AUDIO.sfx.hit(); }
     else if(!foes.length && n.hp<n.maxHp) n.hp=Math.min(n.maxHp, n.hp+8*dt);   // regen out of fight
   });
 }
@@ -508,6 +508,139 @@ const T = {
     "Vurm, of the well and the drought — you keep the water.":"Vurm, du puits et de la sécheresse — vous gardez l'eau.",
     "Ithra, of judgement — you keep the law.":"Ithra, du jugement — vous gardez la loi.",
     "Kel, of war — you keep the ridge by the blade.":"Kel, de la guerre — vous gardez la crête par la lame.",
+    "The Souring":"L'Aigrissement",
+    "The Long Thirst":"La Longue Soif",
+    "The Drowning":"La Noyade",
+    "The Warband":"La Bande de Guerre",
+    "The Whetstone":"La Pierre à Aiguiser",
+    "The Broken Watch":"La Garde Brisée",
+    "The Reckoning":"Le Règlement de Comptes",
+    "The Bargain":"Le Marché",
+    "Cleanse the fouled well — tend it  [E]":"Purifiez le puits souillé — entretenez-le  [E]",
+    "Draw water — tend the Well  [E]":"Puisez de l'eau — entretenez le Puits  [E]",
+    "Save the harvest — reap the Fields  [E]":"Sauvez la récolte — moissonnez les Champs  [E]",
+    "Break the raiders assailing the vale":"Brisez les pillards qui assaillent le val",
+    "Thin the ridge before it swells — slay raiders":"Éclaircissez la crête avant qu'elle ne gonfle — tuez des pillards",
+    "Stand firm — fortify the Palisade  [E]":"Tenez bon — fortifiez la Palissade  [E]",
+    "Answer Ithra — read the next omen's hand truly":"Répondez à Ithra — lisez avec justesse la main du prochain présage",
+    "Ithra holds a debt against you — settle it  [P]":"Ithra détient une dette contre vous — réglez-la  [P]",
+    "The Ashen Wolf":"Le Loup de Cendre",
+    "Kaine Returns":"Le Retour de Kaine",
+    "Kaine, Unmasked":"Kaine, Démasqué",
+    "\"You bleed for a well? Kel bleeds for none.\" A rider watches from the ridge — then rides down to meet you.":"« Tu saignes pour un puits ? Kel ne saigne pour personne. » Un cavalier observe depuis la crête — puis descend à ta rencontre.",
+    "\"Bran called me brother, once.\" The Ashen Wolf cuts down a straggler without looking at him.":"« Bran m'appelait frère, autrefois. » Le Loup de Cendre abat un traînard sans même le regarder.",
+    "\"No more retreat. Kel is done waiting — and so am I.\" He sheds what was left of the man.":"« Plus de retraite. Kel a fini d'attendre — et moi aussi. » Il se dépouille de ce qui restait de l'homme.",
+    "Kaine breaks off, bleeding, and laughs. \"Next time, wolf-cub.\"":"Kaine se retire, saignant, et rit. « La prochaine fois, louveteau. »",
+    "Kaine flees the field again — slower this time. Something in him is running out.":"Kaine fuit de nouveau le champ — plus lentement, cette fois. Quelque chose en lui s'épuise.",
+    "The Thirsting Well":"Le Puits Assoiffé",
+    "The Fields":"Les Champs",
+    "Aldermere":"Aldremère",
+    "The Palisade":"La Palissade",
+    "The Grudge Ridge":"La Crête de la Rancune",
+    "The Ledger Shrine":"Le Sanctuaire du Grand Livre",
+    "Kel's Warcamp":"Le Camp de Guerre de Kel",
+    "draw & tend the water":"puiser et entretenir l'eau",
+    "harvest":"récolter",
+    "rest the village":"reposer le village",
+    "fortify":"fortifier",
+    "watch the treeline":"surveiller la lisière",
+    "offer, settle, desecrate":"offrir, régler, profaner",
+    "stand at the dead fires — pay Kel his due":"se tenir aux feux éteints — payer son dû à Kel",
+    "the well-keeper":"la gardienne du puits",
+    "a young mother":"une jeune mère",
+    "the watchman":"le guetteur",
+    "the shrine-tender":"la gardienne du sanctuaire",
+    "The well tastes of copper and old grudge. Vurm counts every cup we drew untended. Cleanse it, and I will rest easier.":"Le puits a un goût de cuivre et de vieille rancune. Vurm compte chaque gorgée que nous avons puisée sans veiller. Purifiez-le, et je dormirai plus tranquille.",
+    "My boy hasn't woken clear-eyed in days. If Oss still leans kind, let the village rest a while.":"Mon garçon ne s'est pas réveillé le regard clair depuis des jours. Si Oss penche encore vers la bonté, laissez le village se reposer un moment.",
+    "Kel is not prayed away, only met. Cut down four of his dogs and the ridge learns fear.":"Kel ne s'écarte pas par la prière, seulement par la rencontre. Abattez quatre de ses chiens et la crête apprendra la peur.",
+    "Ithra keeps a ledger, and so must you. When the next omen comes, name whose hand it was — truly.":"Ithra tient un registre, et vous devez faire de même. Quand le prochain présage viendra, nommez de quelle main il venait — avec justesse.",
+    "Still it runs foul. Please — draw the cover, clear the silt.":"Il coule encore trouble. Je vous en prie — soulevez le couvercle, dégagez la vase.",
+    "He is weaker today. We need respite — rest us, or a mending hand.":"Il nous faut du répit — reposez-nous, ou tendez une main réparatrice.",
+    "Fewer than four still breathe up there. Keep at it.":"Moins de quatre respirent encore là-haut. Continuez.",
+    "The signs still puzzle you. Watch closer; name the next one right.":"Les signes vous déconcertent encore. Observez de plus près ; nommez le prochain avec justesse.",
+    "The water runs clear again. Bless your hands. Vurm is quiet… for now.":"L'eau coule claire de nouveau. Bénies soient vos mains. Vurm se tait… pour l'instant.",
+    "He smiled this morning. Oss’s mercy moves through you. Thank you.":"Il a souri ce matin. La miséricorde d'Oss passe par vous. Merci.",
+    "Four cold on the slope. Kel respects a blade that answers. Well fought.":"Quatre froids sur la pente. Kel respecte une lame qui répond. Bien combattu.",
+    "You saw the hand behind the sign. Ithra marks you as one who reckons true.":"Vous avez vu la main derrière le signe. Ithra vous marque comme quelqu'un qui juge avec justesse.",
+    "The well sours as we speak — go, before the children drink!":"Le puits s'aigrit à l'instant même — allez, avant que les enfants n'y boivent !",
+    "Everyone is afraid. Steady us — we cannot hold if hope goes.":"Tout le monde a peur. Rassurez-nous — nous ne tiendrons pas si l'espoir s'en va.",
+    "They are coming NOW — meet them, quickly!":"Ils arrivent MAINTENANT — affrontez-les, vite !",
+    "A judgement comes. Read it rightly, or we answer a debt not ours.":"Un jugement approche. Lisez-le avec justesse, ou nous répondrons d'une dette qui n'est pas la nôtre.",
+    "The Ashen Wolf, twice now. I know that blade-work — I taught it to him, once. Finish what I couldn't.":"Le Loup de Cendre, deux fois déjà. Je reconnais ce jeu de lame — je le lui ai enseigné, autrefois. Finissez ce que je n'ai pas pu finir.",
+    "Ask about Aldermere":"Interroger sur Aldremère",
+    "Ask about Vurm":"Interroger sur Vurm",
+    "Ask why she tends it so fiercely":"Demander pourquoi elle l'entretient avec tant d'ardeur",
+    "\"I'm sorry. That's a heavy thing to carry.\"":"« Je suis désolé(e). C'est un lourd fardeau à porter. »",
+    "\"The vale needs the water more than it needs grief.\"":"« Le val a plus besoin d'eau que de chagrin. »",
+    "Ask about her son":"Interroger sur son fils",
+    "Ask why she trusts mercy over strength":"Demander pourquoi elle fait confiance à la miséricorde plutôt qu'à la force",
+    "Ask what happened to her husband":"Demander ce qui est arrivé à son mari",
+    "\"Kel will answer for that, one day.\"":"« Kel répondra de cela, un jour. »",
+    "\"I'm sorry. That's an old wound, still open.\"":"« Je suis désolé(e). C'est une vieille blessure, encore ouverte. »",
+    "Ask what he watches for":"Demander ce qu'il guette",
+    "Ask what Kel is to him":"Demander ce que Kel représente pour lui",
+    "Ask him about Kaine":"L'interroger sur Kaine",
+    "Press him — what really happened?":"Le presser — que s'est-il vraiment passé ?",
+    "Let it go — some things aren't yours to know.":"Laisser tomber — certaines choses ne sont pas à vous de savoir.",
+    "Ask about the shrine":"Interroger sur le sanctuaire",
+    "Ask her view on judgement":"Demander son avis sur le jugement",
+    "Ask why she tends the shrine herself":"Demander pourquoi elle entretient elle-même le sanctuaire",
+    "\"What did you bargain for?\"":"« Qu'avez-vous marchandé ? »",
+    "\"That's yours to carry. I won't pry.\"":"« Cela vous appartient de porter. Je ne fouillerai pas. »",
+    "Before the souring, this was a green place — full nights, fat harvests. I don't remember when the water first turned. Only that we stopped trusting it, and started tending it instead. That's most of what a vale is, in the end: what you keep tending after you stop trusting it.":"Avant l'aigrissement, c'était un lieu verdoyant — des nuits pleines, de grasses récoltes. Je ne me souviens pas du jour où l'eau a tourné. Seulement que nous avons cessé de lui faire confiance, et commencé à l'entretenir à la place. C'est presque tout ce qu'est un val, au fond : ce que l'on continue d'entretenir après avoir cessé d'y croire.",
+    "Vurm doesn't punish you the way Kel does — loud, then over. Vurm just... withholds. Quietly, for years, until you notice the well tastes wrong and you can't remember when it started. I've made my peace with a god like that. Mostly.":"Vurm ne vous punit pas comme le fait Kel — bruyamment, puis c'est fini. Vurm se contente de… retenir. Silencieusement, pendant des années, jusqu'à ce que vous remarquiez que le puits a mauvais goût sans pouvoir dire depuis quand. Je me suis fait une raison avec un dieu pareil. La plupart du temps.",
+    "My mother drew water from this well the winter it first soured, and didn't know. She was gone within the month. I was young enough that I only remember the SHAPE of losing her, not the reasons. I tend the well because nobody tended it for her.":"Ma mère a puisé l'eau de ce puits l'hiver où il a commencé à s'aigrir, sans le savoir. Elle était partie avant la fin du mois. J'étais assez jeune pour ne me souvenir que de la FORME de sa perte, pas des raisons. J'entretiens ce puits parce que personne ne l'a entretenu pour elle.",
+    "He asks me sometimes why the vale is sick. I don't have a good answer that isn't frightening, so I tell him the gods are arguing and we're waiting for them to finish. He seems to accept that better than I do.":"Il me demande parfois pourquoi le val est malade. Je n'ai pas de bonne réponse qui ne soit pas effrayante, alors je lui dis que les dieux se disputent et que nous attendons qu'ils terminent. Il semble mieux l'accepter que moi.",
+    "I've seen what strength costs, up close. Mercy is slower and it doesn't always feel like winning. But it's the only thing I've seen that doesn't ask you to bury someone to prove it worked.":"J'ai vu de près ce que coûte la force. La miséricorde est plus lente et ne ressemble pas toujours à une victoire. Mais c'est la seule chose que j'aie vue qui ne vous demande pas d'enterrer quelqu'un pour prouver qu'elle a fonctionné.",
+    "He went up to the ridge with the watch, three winters back, when the raids were bad. He didn't come back down. Bran was there. He doesn't talk about it and I don't make him.":"Il est monté à la crête avec la garde, il y a trois hivers, quand les raids étaient terribles. Il n'est pas redescendu. Bran était là. Il n'en parle pas et je ne l'y force pas.",
+    "Smoke that isn't ours. Birds that go quiet wrong. Most nights it's nothing — a fox, the wind. I stay anyway. The one night it isn't nothing is the only night that matters, and you don't get to pick which one that is.":"Une fumée qui n'est pas la nôtre. Des oiseaux qui se taisent mal. La plupart des nuits, ce n'est rien — un renard, le vent. Je reste quand même. La nuit où ce n'est pas rien est la seule qui compte, et on ne choisit pas laquelle ce sera.",
+    "Not a friend. Not quite an enemy either. Kel is the reason I'm still standing on this ridge instead of lying on it. I don't love him for that. But I don't forget it.":"Pas un ami. Pas tout à fait un ennemi non plus. Kel est la raison pour laquelle je me tiens encore debout sur cette crête au lieu d'y être couché. Je ne l'aime pas pour cela. Mais je ne l'oublie pas non plus.",
+    "We stood the ridge together for six years. Good man, then. Something happened up past the treeline — I still don't fully know what, he wouldn't say, and I didn't push hard enough while there was still time to push. When he came back changed, I told myself it would pass. It didn't.":"Nous avons tenu la crête ensemble pendant six ans. Un homme bon, alors. Quelque chose s'est passé au-delà de la lisière — je ne sais toujours pas vraiment quoi, il refusait de le dire, et je n'ai pas insisté assez tant qu'il était encore temps d'insister. Quand il est revenu changé, je me suis dit que ça passerait. Ce n'est pas passé.",
+    "Older than Aldermere itself, they say — the vale was named around it, not the other way. Ithra doesn't ask for worship here, just an honest accounting. Some days that feels harder to give than worship would be.":"Plus ancien qu'Aldremère elle-même, dit-on — le val fut nommé autour de lui, et non l'inverse. Ithra n'exige pas de culte ici, seulement un compte honnête. Certains jours, cela semble plus difficile à donner qu'un culte ne le serait.",
+    "People hear 'judgement' and think punishment. Ithra's colder than that and, I think, fairer for it. The ledger doesn't care if you meant well. It cares if the debt is paid. I used to find that terrifying. Now I find it almost restful.":"Les gens entendent « jugement » et pensent châtiment. Ithra est plus froide que cela et, je crois, plus juste pour cela. Le registre se moque de vos bonnes intentions. Il se soucie que la dette soit payée. Autrefois, je trouvais cela terrifiant. Maintenant, je trouve cela presque reposant.",
+    "Because I owe Ithra a debt of my own, from before I came to this vale, and this is how I've chosen to carry it — in the open, where I can't pretend it isn't there.":"Parce que je dois moi-même une dette à Ithra, depuis avant mon arrivée dans ce val, et c'est ainsi que j'ai choisi de la porter — au grand jour, là où je ne peux prétendre qu'elle n'existe pas.",
+    "She nods, quiet a moment. \"Most people say something like that and move on. Thank you for not moving on quite so fast.\"":"Elle acquiesce, silencieuse un instant. « La plupart des gens disent quelque chose comme ça et passent à autre chose. Merci de ne pas être passé(e) si vite. »",
+    "A short, dry laugh. \"Vurm would agree with you. That's either a comfort or a warning — I've never worked out which.\"":"Un rire bref et sec. « Vurm serait d'accord avec vous. C'est soit un réconfort, soit un avertissement — je n'ai jamais su lequel. »",
+    "Her jaw tightens. \"Maybe. But I have a son to raise, and vengeance is a poor thing to raise him on. Careful whose ledger you're settling.\"":"Sa mâchoire se crispe. « Peut-être. Mais j'ai un fils à élever, et la vengeance est une piètre chose sur laquelle l'élever. Prenez garde au registre que vous réglez. »",
+    "\"It closes a little more every year he grows. That's the only mending I've found that actually holds.\" She almost smiles.":"« Elle se referme un peu plus chaque année qu'il grandit. C'est la seule guérison que j'aie trouvée qui tienne vraiment. » Elle esquisse presque un sourire.",
+    "He's quiet a long moment. \"A raid went wrong. Someone he was supposed to save, he didn't. That's all I have — he never gave me more, and I stopped asking before I lost him twice.\" His voice has gone flat.":"Il reste silencieux un long moment. « Un raid a mal tourné. Quelqu'un qu'il devait sauver, il ne l'a pas sauvé. C'est tout ce que j'ai — il ne m'en a jamais dit plus, et j'ai cessé de demander avant de le perdre une seconde fois. » Sa voix s'est faite plate.",
+    "Something in his shoulders eases. \"Most people push. Thank you for not being most people.\"":"Quelque chose se détend dans ses épaules. « La plupart des gens insistent. Merci de ne pas être la plupart des gens. »",
+    "\"Someone I loved was dying. I bargained for time I hadn't earned. I got it — and I've been paying for it, honestly, ever since. I don't regret the bargain. I regret that I'd make it again.\" She says it plainly, like a debt already reckoned.":"« Quelqu'un que j'aimais était mourant. J'ai marchandé un temps que je n'avais pas mérité. Je l'ai obtenu — et je le paie honnêtement depuis. Je ne regrette pas le marché. Je regrette de savoir que je le referais. » Elle le dit simplement, comme une dette déjà réglée.",
+    "\"Most people ask anyway.\" A faint, real smile. \"Thank you for the exception.\"":"« La plupart des gens demandent quand même. » Un sourire faible mais sincère. « Merci pour l'exception. »",
+    "Cleanse the Thirsting Well  [tend it]":"Purifiez le Puits Assoiffé  [entretenez-le]",
+    "Bring the village respite  [rest Aldermere, or Mend]":"Apportez du répit au village  [reposez Aldremère, ou Guérison]",
+    "Break the ridge-raiders  [slay 4]":"Brisez les pillards de la crête  [tuez-en 4]",
+    "Read a god's hand truly  [name one omen right]":"Lisez avec justesse la main d'un dieu  [nommez un présage correctement]",
+    "Then the water remembers you kindly. I always knew it would be Vurm.":"Alors l'eau se souviendra de vous avec bienveillance. J'ai toujours su que ce serait Vurm.",
+    "Not Vurm? …well. The well will keep regardless. I hope you chose well.":"Pas Vurm ? …bien. Le puits continuera malgré tout. J'espère que vous avez bien choisi.",
+    "Oss, then. My boy will grow up gentler for it. Thank you.":"Oss, alors. Mon garçon en grandira plus doux. Merci.",
+    "Not Oss… I understand. Mercy isn't the only shield a home needs.":"Pas Oss… je comprends. La miséricorde n'est pas le seul bouclier dont un foyer a besoin.",
+    "Kel, then. Good. The ridge respects nothing else — and neither did Kaine, in the end.":"Kel, alors. Bien. La crête ne respecte rien d'autre — et Kaine non plus, à la fin.",
+    "Not Kel… softer choice. I hope it holds when the next blade comes down from the ridge.":"Pas Kel… un choix plus doux. J'espère qu'il tiendra quand la prochaine lame descendra de la crête.",
+    "Ithra keeps the ledger balanced. A fitting hand to trust — the debts are yours to weigh now.":"Ithra tient le registre en équilibre. Une main digne de confiance — les dettes sont désormais les vôtres à peser.",
+    "Not Ithra? The ledger will still be kept — just not by the hand you chose.":"Pas Ithra ? Le registre sera tenu tout de même — simplement pas par la main que vous avez choisie.",
+    "Charge taken —":"Charge acceptée —",
+    "charge fulfilled, the vale takes heart.":"charge accomplie, le val reprend courage.",
+    "lost to the vale.":"perdu(e) pour le val.",
+    "takes up arms at your side":"prend les armes à vos côtés",
+    "downed!":"à terre !",
+    "answered.":"répondu.",
+    "takes note.":"en prend note.",
+    "Oss stays the ruin.":"Oss retient la ruine.",
+    "The divine mind stirs…":"L'esprit divin s'éveille…",
+    "The divine mind would not wake here (no WebGPU?). The vale keeps its old gods.":"L'esprit divin n'a pas voulu s'éveiller ici (pas de WebGPU ?). Le val garde ses anciens dieux.",
+    "Relic bound —":"Relique liée —",
+    "Left the relic behind.":"Relique laissée derrière.",
+    "+4 grain for the vale":"+4 grain pour le val",
+    "A debt is settled — Ithra marks the ledger even.":"Une dette est réglée — Ithra équilibre le grand livre.",
+    "The shrine comes apart under your hands. Every god remembers this.":"Le sanctuaire se défait sous vos mains. Chaque dieu s'en souviendra.",
+    "The tale resumes.":"Le récit reprend.",
+    "speak with":"parler à",
+    "leave":"partir",
+    "their charge is fulfilled":"leur charge est accomplie",
+    "the vale holds its breath…":"le val retient son souffle…",
+    "the vale":"le val",
+    "the ashfields":"les champs de cendre",
   },
   zh: {
     'THEODICY':'神義論',
@@ -524,6 +657,139 @@ const T = {
     "Vurm, of the well and the drought — you keep the water.":"弗爾姆，井與旱之神——你守護水源。",
     "Ithra, of judgement — you keep the law.":"伊斯拉，審判之神——你守護律法。",
     "Kel, of war — you keep the ridge by the blade.":"凱爾，戰爭之神——你以刀刃守護山脊。",
+    "The Souring":"酸腐之禍",
+    "The Long Thirst":"長旱之渴",
+    "The Drowning":"滅頂之災",
+    "The Warband":"戰團來襲",
+    "The Whetstone":"磨刀之石",
+    "The Broken Watch":"破碎的守望",
+    "The Reckoning":"清算之時",
+    "The Bargain":"交易之約",
+    "Cleanse the fouled well — tend it  [E]":"淨化污濁的水井——照看它  [E]",
+    "Draw water — tend the Well  [E]":"汲水——照看水井  [E]",
+    "Save the harvest — reap the Fields  [E]":"搶救收成——收割田野  [E]",
+    "Break the raiders assailing the vale":"擊潰侵襲幽谷的掠奪者",
+    "Thin the ridge before it swells — slay raiders":"在山脊壯大之前削弱它——誅殺掠奪者",
+    "Stand firm — fortify the Palisade  [E]":"堅守陣地——加固柵欄  [E]",
+    "Answer Ithra — read the next omen's hand truly":"回應伊斯拉——如實解讀下一個徵兆之手",
+    "Ithra holds a debt against you — settle it  [P]":"伊斯拉持有你的債務——清償它  [P]",
+    "The Ashen Wolf":"灰燼之狼",
+    "Kaine Returns":"凱恩歸來",
+    "Kaine, Unmasked":"凱恩，卸下偽裝",
+    "\"You bleed for a well? Kel bleeds for none.\" A rider watches from the ridge — then rides down to meet you.":"「你為了一口井而流血？凱爾不為任何人流血。」一名騎手自山脊眺望——隨即策馬而下，前來會你。",
+    "\"Bran called me brother, once.\" The Ashen Wolf cuts down a straggler without looking at him.":"「布蘭曾喚我為兄弟。」灰燼之狼看也不看，便斬殺了一名落隊者。",
+    "\"No more retreat. Kel is done waiting — and so am I.\" He sheds what was left of the man.":"「不再退卻了。凱爾已等得不耐，我也是。」他褪去了殘存人性的最後一絲外殼。",
+    "Kaine breaks off, bleeding, and laughs. \"Next time, wolf-cub.\"":"凱恩帶傷撤退，大笑道：「下次吧，小狼崽。」",
+    "Kaine flees the field again — slower this time. Something in him is running out.":"凱恩再次逃離戰場——這次更為遲緩。他體內的某樣東西正在耗盡。",
+    "The Thirsting Well":"渴井",
+    "The Fields":"田野",
+    "Aldermere":"亞德莫爾",
+    "The Palisade":"柵欄壁壘",
+    "The Grudge Ridge":"宿怨山脊",
+    "The Ledger Shrine":"帳冊神龕",
+    "Kel's Warcamp":"凱爾的戰營",
+    "draw & tend the water":"汲水並照看",
+    "harvest":"收成",
+    "rest the village":"讓村莊歇息",
+    "fortify":"加固",
+    "watch the treeline":"守望林線",
+    "offer, settle, desecrate":"獻祭、清償、褻瀆",
+    "stand at the dead fires — pay Kel his due":"立於熄滅的營火前——償還凱爾應得之債",
+    "the well-keeper":"守井人",
+    "a young mother":"年輕的母親",
+    "the watchman":"守望者",
+    "the shrine-tender":"神龕守護者",
+    "The well tastes of copper and old grudge. Vurm counts every cup we drew untended. Cleanse it, and I will rest easier.":"井水嚐起來有銅鏽與陳年怨懟的味道。弗爾姆記著我們每一次未加照看便汲取的水。淨化它，我才能安心。",
+    "My boy hasn't woken clear-eyed in days. If Oss still leans kind, let the village rest a while.":"我的孩子已經好幾天沒能清醒地醒來了。若歐斯仍傾向仁慈，就讓村莊歇息一陣吧。",
+    "Kel is not prayed away, only met. Cut down four of his dogs and the ridge learns fear.":"凱爾無法靠祈禱打發，只能靠正面相對。斬殺四隻他的獵犬，山脊便會學會恐懼。",
+    "Ithra keeps a ledger, and so must you. When the next omen comes, name whose hand it was — truly.":"伊斯拉持有一本帳冊，你也必須如此。當下一個徵兆降臨時，如實指出那是哪位神明之手。",
+    "Still it runs foul. Please — draw the cover, clear the silt.":"它仍舊污濁。求你——掀開井蓋，清去淤泥。",
+    "He is weaker today. We need respite — rest us, or a mending hand.":"他今天更虛弱了。我們需要喘息——讓我們歇息，或施以療癒之手。",
+    "Fewer than four still breathe up there. Keep at it.":"山上尚存活的不到四隻了。繼續。",
+    "The signs still puzzle you. Watch closer; name the next one right.":"這些徵兆仍令你困惑。仔細觀察，正確指出下一個。",
+    "The water runs clear again. Bless your hands. Vurm is quiet… for now.":"水又變清澈了。願你的雙手蒙福。弗爾姆暫時平靜下來了……眼下是如此。",
+    "He smiled this morning. Oss’s mercy moves through you. Thank you.":"他今早笑了。歐斯的慈悲透過你流轉。謝謝你。",
+    "Four cold on the slope. Kel respects a blade that answers. Well fought.":"四具屍身冷臥於坡上。凱爾敬重應戰之刃。打得漂亮。",
+    "You saw the hand behind the sign. Ithra marks you as one who reckons true.":"你看穿了徵兆背後的手。伊斯拉將你標記為能如實判斷之人。",
+    "The well sours as we speak — go, before the children drink!":"此刻井水正在變質——快去，趁孩子們還沒喝下它！",
+    "Everyone is afraid. Steady us — we cannot hold if hope goes.":"所有人都害怕了。安定我們——若希望消散，我們將無法支撐下去。",
+    "They are coming NOW — meet them, quickly!":"他們現在就要來了——快去迎戰！",
+    "A judgement comes. Read it rightly, or we answer a debt not ours.":"審判將至。如實解讀它，否則我們將背負一筆不屬於我們的債。",
+    "The Ashen Wolf, twice now. I know that blade-work — I taught it to him, once. Finish what I couldn't.":"灰燼之狼，這已是第二次了。我認得那套劍法——是我曾經教他的。完成我未能完成之事。",
+    "Ask about Aldermere":"詢問亞德莫爾",
+    "Ask about Vurm":"詢問弗爾姆",
+    "Ask why she tends it so fiercely":"詢問她為何如此執著地照看此井",
+    "\"I'm sorry. That's a heavy thing to carry.\"":"「我很遺憾。那是一副沉重的擔子。」",
+    "\"The vale needs the water more than it needs grief.\"":"「這座幽谷需要的是水，而非哀傷。」",
+    "Ask about her son":"詢問她的兒子",
+    "Ask why she trusts mercy over strength":"詢問她為何信賴慈悲勝於力量",
+    "Ask what happened to her husband":"詢問她丈夫發生了什麼事",
+    "\"Kel will answer for that, one day.\"":"「凱爾終有一天會為此付出代價。」",
+    "\"I'm sorry. That's an old wound, still open.\"":"「我很遺憾。那是道尚未癒合的舊傷。」",
+    "Ask what he watches for":"詢問他在守望什麼",
+    "Ask what Kel is to him":"詢問凱爾對他而言意味著什麼",
+    "Ask him about Kaine":"向他詢問凱恩的事",
+    "Press him — what really happened?":"追問他——究竟發生了什麼事？",
+    "Let it go — some things aren't yours to know.":"就此打住——有些事並非你該知道的。",
+    "Ask about the shrine":"詢問神龕的事",
+    "Ask her view on judgement":"詢問她對審判的看法",
+    "Ask why she tends the shrine herself":"詢問她為何親自照看神龕",
+    "\"What did you bargain for?\"":"「你當初交易換來的是什麼？」",
+    "\"That's yours to carry. I won't pry.\"":"「那是你該獨自背負的。我不會追問。」",
+    "Before the souring, this was a green place — full nights, fat harvests. I don't remember when the water first turned. Only that we stopped trusting it, and started tending it instead. That's most of what a vale is, in the end: what you keep tending after you stop trusting it.":"在酸腐降臨之前，這裡是一片翠綠之地——夜夜豐盈，年年豐收。我不記得井水是何時開始變質的。只記得我們不再信任它，轉而開始照看它。說到底，一座幽谷多半便是如此：當你不再信任某樣事物後，仍持續照看它。",
+    "Vurm doesn't punish you the way Kel does — loud, then over. Vurm just... withholds. Quietly, for years, until you notice the well tastes wrong and you can't remember when it started. I've made my peace with a god like that. Mostly.":"弗爾姆懲罰人的方式與凱爾不同——凱爾轟然而至，轉瞬即逝。弗爾姆只是……悄悄地扣留。靜默無聲，經年累月，直到你察覺井水的味道不對，卻已想不起是從何時開始的。我已與這樣的神明和解了。大致上如此。",
+    "My mother drew water from this well the winter it first soured, and didn't know. She was gone within the month. I was young enough that I only remember the SHAPE of losing her, not the reasons. I tend the well because nobody tended it for her.":"我母親在這口井第一次變質的那個冬天取了水，渾然不知。不到一個月，她便離世了。我當時年紀尚小，只記得失去她的「形狀」，卻記不清緣由。我照看這口井，是因為當年沒有人為她照看它。",
+    "He asks me sometimes why the vale is sick. I don't have a good answer that isn't frightening, so I tell him the gods are arguing and we're waiting for them to finish. He seems to accept that better than I do.":"他有時會問我，為什麼幽谷病了。我沒有一個不嚇人的好答案，於是告訴他諸神正在爭執，我們在等他們吵完。他似乎比我更能接受這個說法。",
+    "I've seen what strength costs, up close. Mercy is slower and it doesn't always feel like winning. But it's the only thing I've seen that doesn't ask you to bury someone to prove it worked.":"我曾近距離見識過力量的代價。慈悲較為緩慢，也不總讓人感覺像是勝利。但那是我所見過，唯一不需要你埋葬某人才能證明其奏效的東西。",
+    "He went up to the ridge with the watch, three winters back, when the raids were bad. He didn't come back down. Bran was there. He doesn't talk about it and I don't make him.":"三個冬天前，劫掠猖獗之時，他隨守衛隊上了山脊。他沒有再下來。布蘭當時也在場。他不談這件事，我也不勉強他。",
+    "Smoke that isn't ours. Birds that go quiet wrong. Most nights it's nothing — a fox, the wind. I stay anyway. The one night it isn't nothing is the only night that matters, and you don't get to pick which one that is.":"不屬於我們的炊煙。異樣沉寂下來的鳥鳴。大多數夜裡什麼都沒有——一隻狐狸，一陣風。我還是留下來守著。唯有「什麼都有」的那一夜才真正要緊，而你無從選擇是哪一夜。",
+    "Not a friend. Not quite an enemy either. Kel is the reason I'm still standing on this ridge instead of lying on it. I don't love him for that. But I don't forget it.":"不是朋友。也稱不上是敵人。凱爾是我至今仍站在這道山脊上，而非倒臥其中的原因。我不會因此而愛戴他。但我也不會忘記這一點。",
+    "We stood the ridge together for six years. Good man, then. Something happened up past the treeline — I still don't fully know what, he wouldn't say, and I didn't push hard enough while there was still time to push. When he came back changed, I told myself it would pass. It didn't.":"我們一起守衛這道山脊六年了。那時他是個好人。林線之外發生了些什麼——我至今仍不完全清楚，他不肯說，而在還來得及追問的時候，我又沒有問得夠深。當他變了個人回來時，我告訴自己這只是一時的。結果並非如此。",
+    "Older than Aldermere itself, they say — the vale was named around it, not the other way. Ithra doesn't ask for worship here, just an honest accounting. Some days that feels harder to give than worship would be.":"據說它比亞德莫爾本身還要古老——這座幽谷是圍繞著它命名的，而非反過來。伊斯拉在此不要求信眾崇拜，只求誠實的交代。有些日子，這比崇拜還難以給予。",
+    "People hear 'judgement' and think punishment. Ithra's colder than that and, I think, fairer for it. The ledger doesn't care if you meant well. It cares if the debt is paid. I used to find that terrifying. Now I find it almost restful.":"人們聽到「審判」便聯想到懲罰。伊斯拉比那更為冷靜，我認為，也因此更為公正。帳冊不在乎你是否出於善意。它在乎的是債是否已還清。我曾經覺得這很可怕。如今卻覺得這近乎令人安心。",
+    "Because I owe Ithra a debt of my own, from before I came to this vale, and this is how I've chosen to carry it — in the open, where I can't pretend it isn't there.":"因為在我來到這座幽谷之前，我便已欠下伊斯拉一筆屬於自己的債，而這是我選擇背負它的方式——攤在陽光下，讓我無法假裝它不存在。",
+    "She nods, quiet a moment. \"Most people say something like that and move on. Thank you for not moving on quite so fast.\"":"她點點頭，沉默片刻。「大多數人說了這種話便轉身離去。謝謝你沒有那麼快就離開。」",
+    "A short, dry laugh. \"Vurm would agree with you. That's either a comfort or a warning — I've never worked out which.\"":"她發出一聲短促而乾澀的笑。「弗爾姆會贊同你的。那究竟是種安慰，還是種警告——我始終沒弄明白。」",
+    "Her jaw tightens. \"Maybe. But I have a son to raise, and vengeance is a poor thing to raise him on. Careful whose ledger you're settling.\"":"她咬緊了牙關。「或許吧。但我還有個兒子要撫養，而復仇是種糟糕的養育方式。小心你在清算的是誰的帳。」",
+    "\"It closes a little more every year he grows. That's the only mending I've found that actually holds.\" She almost smiles.":"「隨著他一年年長大，傷口也一點點癒合。那是我找到唯一真正有效的療法。」她幾乎笑了出來。",
+    "He's quiet a long moment. \"A raid went wrong. Someone he was supposed to save, he didn't. That's all I have — he never gave me more, and I stopped asking before I lost him twice.\" His voice has gone flat.":"他沉默了許久。「一次劫掠出了差錯。有個他本該救下的人，他沒能救成。這就是我所知道的一切——他從未告訴我更多，而在我第二次失去他之前，我便不再追問了。」他的語氣已歸於平淡。",
+    "Something in his shoulders eases. \"Most people push. Thank you for not being most people.\"":"他的肩膀似乎放鬆了些。「大多數人都會追問。謝謝你不是大多數人。」",
+    "\"Someone I loved was dying. I bargained for time I hadn't earned. I got it — and I've been paying for it, honestly, ever since. I don't regret the bargain. I regret that I'd make it again.\" She says it plainly, like a debt already reckoned.":"「我所愛之人當時將死。我交易換來了我未曾掙得的時間。我得到了它——而從那時起，我便一直老實地償還著。我不後悔這筆交易。我後悔的是，若重來一次，我還是會做同樣的選擇。」她說得平靜，彷彿那是一筆早已清算完畢的債。",
+    "\"Most people ask anyway.\" A faint, real smile. \"Thank you for the exception.\"":"「大多數人還是會問。」一抹淺淺卻真切的微笑。「謝謝你是個例外。」",
+    "Cleanse the Thirsting Well  [tend it]":"淨化渴井  [照看它]",
+    "Bring the village respite  [rest Aldermere, or Mend]":"為村莊帶來喘息  [讓亞德莫爾歇息，或使用療癒]",
+    "Break the ridge-raiders  [slay 4]":"擊潰山脊掠奪者  [誅殺 4 名]",
+    "Read a god's hand truly  [name one omen right]":"如實解讀神明之手  [正確指出一個徵兆]",
+    "Then the water remembers you kindly. I always knew it would be Vurm.":"那麼水將溫柔地記住你。我早就知道會是弗爾姆。",
+    "Not Vurm? …well. The well will keep regardless. I hope you chose well.":"不是弗爾姆？……好吧。井水終究會留存下去。希望你選對了。",
+    "Oss, then. My boy will grow up gentler for it. Thank you.":"那麼，歐斯。我的孩子將因此成長得更加溫柔。謝謝你。",
+    "Not Oss… I understand. Mercy isn't the only shield a home needs.":"不是歐斯……我明白。慈悲並非一個家所需要的唯一屏障。",
+    "Kel, then. Good. The ridge respects nothing else — and neither did Kaine, in the end.":"那麼，凱爾。很好。山脊不敬重其他任何東西——到頭來，凱恩也是如此。",
+    "Not Kel… softer choice. I hope it holds when the next blade comes down from the ridge.":"不是凱爾……較為溫和的選擇。希望當下一柄劍從山脊降下時，它能撐得住。",
+    "Ithra keeps the ledger balanced. A fitting hand to trust — the debts are yours to weigh now.":"伊斯拉使帳冊保持平衡。一雙值得信賴的手——如今權衡債務之責在你了。",
+    "Not Ithra? The ledger will still be kept — just not by the hand you chose.":"不是伊斯拉？帳冊仍將被記錄——只是不再經由你所選擇的那雙手。",
+    "Charge taken —":"已接下囑託——",
+    "charge fulfilled, the vale takes heart.":"囑託已完成，幽谷重燃希望。",
+    "lost to the vale.":"殞落於幽谷。",
+    "takes up arms at your side":"在你身側持械而戰",
+    "downed!":"倒下了！",
+    "answered.":"已回應。",
+    "takes note.":"已記下此事。",
+    "Oss stays the ruin.":"歐斯遏止了毀滅。",
+    "The divine mind stirs…":"神之心智正在甦醒……",
+    "The divine mind would not wake here (no WebGPU?). The vale keeps its old gods.":"神之心智未能在此甦醒（沒有 WebGPU？）。幽谷仍守著舊日的神明。",
+    "Relic bound —":"已綁定聖物——",
+    "Left the relic behind.":"將聖物留下了。",
+    "+4 grain for the vale":"幽谷 +4 穀糧",
+    "A debt is settled — Ithra marks the ledger even.":"一筆債已清償——伊斯拉將帳冊抹平。",
+    "The shrine comes apart under your hands. Every god remembers this.":"神龕在你手中崩解。每一位神明都將記住此事。",
+    "The tale resumes.":"故事繼續。",
+    "speak with":"對話：",
+    "leave":"離開",
+    "their charge is fulfilled":"他們的囑託已完成",
+    "the vale holds its breath…":"幽谷屏息以待……",
+    "the vale":"幽谷",
+    "the ashfields":"灰燼之地",
   },
 };
 // ---- minimap: a small DOM overlay, world (x,z) -> panel pixels. No second camera/render pass. ----
@@ -580,7 +846,7 @@ function beginCrisis(verb, act){ const c=CRISES[verb]; if(!c) return;
   crisis={...c, verb, resolved:false}; banner={t:c.title, brief:act.omen||''}; bannerT=5;
   if(c.kind==='slay'){ w.tension=Math.max(w.tension,55); const n=2+Math.floor(day/3); crisis.pending=n; spawnWave(n, crisis); } }   // only THIS wave counts toward resolution, not ambient spawns
 function resolveCrisis(){ if(!crisis||crisis.resolved) return; crisis.resolved=true; addPiety(crisis.god,1.5);
-  toast=`${crisis.title} — answered. ${GNAME(crisis.god)} takes note.`; toastT=3;
+  toast=`${t(crisis.title)} — ${t('answered.')} ${GNAME(crisis.god)} ${t('takes note.')}`; toastT=3;
   const rec=chronicle.find(r=>r.crisis===crisis.title&&!r.done); if(rec) rec.done=true; crisis=null; }
 // ---- PORTENTS: when the AWAKENED model speaks, its own words can cause something — not just narrate the
 // act the oracle already chose. Small models can't produce reliable structure (the project's whole thesis),
@@ -611,7 +877,7 @@ function onGodAct(act){                                   // THE hook: one real 
                      crisis:(CRISES[act.verb]||{}).title, done:false});
   if(chronicle.length>24) chronicle.pop();
   checkPortent(act);
-  if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast='Oss stays the ruin.'; toastT=2.5; }
+  if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast=t('Oss stays the ruin.'); toastT=2.5; }
   else if(act.verb==='reveal'){ addPiety('ithra',0.4); }
   else if(CRISES[act.verb] && (!crisis||crisis.resolved) && !trialOn){ beginCrisis(act.verb, act); }
   if((act.verb==='raid'||act.verb==='arm') && rival.stage<2 && !trialOn && !enemies.some(e=>e.isRival&&!e.dying)) spawnRivalEncounter(rival.stage+1);
@@ -630,7 +896,7 @@ function storyTick(){ if(!started||w.over) return; maybeOfferCovenant(); }   // 
 // ---- awaken the real model: swap god.decide() to the in-browser 50M LLM (WebGPU→WASM, else keep heuristic) ----
 async function awakenModel(){
   if(godLoading || godBackend==='supra') return;
-  godLoading=true; godPct=0; toast='The divine mind stirs…'; toastT=3;
+  godLoading=true; godPct=0; toast=t('The divine mind stirs…'); toastT=3;
   // tiered: WebGPU → Qwen2.5-0.5B that actually CHOOSES (4/4 in eval); WASM → SmolLM2-360M voice-only
   const plan = navigator.gpu
     ? [{id:'onnx-community/Qwen2.5-0.5B-Instruct', name:'Qwen2.5-0.5B', mode:'choose', device:'webgpu'},
@@ -648,7 +914,7 @@ async function awakenModel(){
     }catch(e){ console.warn('awaken('+cfg.id+'/'+cfg.device+') failed:', e); }
   }
   godLoading=false; godBackend='heuristic';
-  toast='The divine mind would not wake here (no WebGPU?). The vale keeps its old gods.'; toastT=5;
+  toast=t('The divine mind would not wake here (no WebGPU?). The vale keeps its old gods.'); toastT=5;
 }
 window.awakenModel = awakenModel;
 const ETYPES = {
@@ -718,14 +984,14 @@ function pickRelicId(){                                // weighted by tier; bett
   const w = day>=4 ? {common:0.4,rare:0.4,mythic:0.2} : day>=2 ? {common:0.55,rare:0.35,mythic:0.10} : {common:0.75,rare:0.23,mythic:0.02};
   const r=Math.random(); const tier = r<w.common?'common':(r<w.common+w.rare?'rare':'mythic');
   const pool=Object.keys(RELICS).filter(k=>RELICS[k].tier===tier); return pool[Math.floor(Math.random()*pool.length)]; }
-function equipRelic(id){ relics.push(id); recomputeStats(); toast=`Relic bound — ${RELICS[id].name}.`; toastT=3; }
+function equipRelic(id){ relics.push(id); recomputeStats(); toast=`${t('Relic bound —')} ${RELICS[id].name}.`; toastT=3; }
 function offerRelic(id){                               // slots full → a real choice: swap one out, or discard the find
   if(relics.length<relicSlots){ equipRelic(id); return; }
   relicOffer=id; busy=true; }
 function resolveRelicOffer(swapIdx){                    // swapIdx: -1 discard, 0..n-1 replace that slot
   if(relicOffer==null) { busy=false; return; }
   if(swapIdx>=0){ const out=relics[swapIdx]; relics.splice(swapIdx,1,relicOffer); toast=`${RELICS[out].name} → ${RELICS[relicOffer].name}.`; toastT=3; }
-  else { toast='Left the relic behind.'; toastT=2; }
+  else { toast=t('Left the relic behind.'); toastT=2; }
   relicOffer=null; busy=false; recomputeStats();
 }
 window.resolveRelicOffer = resolveRelicOffer;
@@ -807,7 +1073,7 @@ function updateCombat(dt){
   // loot: bob, spin, auto-collect on touch — grain feeds the vale, relics buff the hero
   for(let i=loot.length-1;i>=0;i--){ const L=loot[i]; L.mesh.rotation.y+=dt*2.5; L.mesh.position.y=1.5+Math.sin(clock.elapsedTime*3+i)*0.3;
     if(hero.position.distanceTo(L.mesh.position)<3.2){
-      if(L.kind==='grain'){ w.village.food+=4; toast='+4 grain for the vale'; toastT=2.2; }
+      if(L.kind==='grain'){ w.village.food+=4; toast=t('+4 grain for the vale'); toastT=2.2; }
       else { offerRelic(L.relicId); }   // slot free → equips outright; slots full → opens the swap choice
       scene.remove(L.mesh); loot.splice(i,1); fx3(L.kind==='grain'?'#f59e0b':(TIER_COLOR[RELICS[L.relicId].tier])); AUDIO.sfx.pickup(); } }
   // death → respawn at the village with brief mercy
@@ -853,8 +1119,8 @@ function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity);   
   else if(a.action==='harvest'){ if(crisis&&crisis.kind==='fields') resolveCrisis(); else addPiety('vurm',0.3); }
   else if(a.action==='fortify'){ if(a.warcamp) addPiety('kel',0.5); else if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
   else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); }
-  else if(a.action==='pay_debt'){ if(crisis&&crisis.kind==='debt') resolveCrisis(); else addPiety('ithra',0.6); toast='A debt is settled — Ithra marks the ledger even.'; toastT=2.5; }
-  else if(a.action==='desecrate'){ toast='The shrine comes apart under your hands. Every god remembers this.'; toastT=4; fx3('#7a1f1f'); } }
+  else if(a.action==='pay_debt'){ if(crisis&&crisis.kind==='debt') resolveCrisis(); else addPiety('ithra',0.6); toast=t('A debt is settled — Ithra marks the ledger even.'); toastT=2.5; }
+  else if(a.action==='desecrate'){ toast=t('The shrine comes apart under your hands. Every god remembers this.'); toastT=4; fx3('#7a1f1f'); } }
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; const ok=guess===pending.actual; reads.push({correct:ok});
   if(ok){ addPiety('ithra',1); if(crisis&&crisis.kind==='read') resolveCrisis(); completeNPC(npcOf('read')); }   // reading a god truly is Ithra's work
   pending={...pending,result:{guess,correct:ok}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
@@ -920,7 +1186,7 @@ function loadGame(){
   party.length=0; party.push(...NPCS.filter(n=>n.ally && n.alive));
   if(!!d.muted !== AUDIO.muted()) AUDIO.toggleMute();
   started=true; showTree=false; showChron=false; shrineMenu=false; npcMenu=null;
-  toast='The tale resumes.'; toastT=3;
+  toast=t('The tale resumes.'); toastT=3;
 }
 window.loadGame = loadGame;
 let saveAvailable = readSave();                            // checked once at page load, for the calling screen's Resume option
@@ -1113,15 +1379,15 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <span class="flex gap-3 items-center"><button data-act="mind" class="pointer-events-auto mono text-[10px] ${godBackend==='supra'?'text-violet-400':'text-stone-500'} hover:text-stone-200" title="the god's mind: heuristic oracle, or awaken an in-browser LLM">${godLoading?`◍ waking ${godName} ${godPct}%`:(godBackend==='supra'?`◈ ${godName}`:'◇ awaken mind')}</button><button data-act="status" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="character sheet (I)">🜂</button><button data-act="chron" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="chronicle (K)">📜</button><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
    </div>
    ${fxT>0?`<div class="absolute inset-0" style="background:${fxC};opacity:${(fxT*0.4).toFixed(2)}"></div>`:''}
-   ${started&&!w.over&&crisis?`<div class="absolute top-14 left-5 max-w-[260px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em]" style="color:${GODC[crisis.god]}">⚠ ${crisis.title} · ${GNAME(crisis.god)}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${crisis.goal}</div></div>`:''}
-   ${started&&!w.over&&!crisis?`<div class="absolute top-14 left-5 pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-stone-500">the vale holds its breath…</div></div>`:''}
-   ${started&&!w.over?`<div class="absolute top-14 right-4 pointer-events-none"><div class="mono text-[7px] uppercase tracking-widest text-stone-500 mb-0.5 text-right">${region}</div><div class="relative rounded border border-stone-800 bg-black/50" style="width:${MM.w}px;height:${MM.h}px">${mmSites}${mmNpcs}${mmFoes}${mmHeroDot}</div></div>`:''}
+   ${started&&!w.over&&crisis?`<div class="absolute top-14 left-5 max-w-[260px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em]" style="color:${GODC[crisis.god]}">⚠ ${t(crisis.title)} · ${GNAME(crisis.god)}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${t(crisis.goal)}</div></div>`:''}
+   ${started&&!w.over&&!crisis?`<div class="absolute top-14 left-5 pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-stone-500">${t('the vale holds its breath…')}</div></div>`:''}
+   ${started&&!w.over?`<div class="absolute top-14 right-4 pointer-events-none"><div class="mono text-[7px] uppercase tracking-widest text-stone-500 mb-0.5 text-right">${t(region)}</div><div class="relative rounded border border-stone-800 bg-black/50" style="width:${MM.w}px;height:${MM.h}px">${mmSites}${mmNpcs}${mmFoes}${mmHeroDot}</div></div>`:''}
    ${started&&!w.over?`<div class="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-none">${DEITY_IDS.map(d=>`<div><div class="mono text-[8px] mb-0.5 ${calling===d?'font-bold':''}" style="color:${GODC[d]}">${GNAME(d)}${calling===d?' ✦':''}</div><div class="w-2.5 h-16 rounded bg-stone-800 relative overflow-hidden"><div class="absolute bottom-0 w-full rounded" style="height:${piety[d]*10}%;background:${GODC[d]}"></div></div></div>`).join('')}</div>`:''}
    ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">your party</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-16" style="color:${npcColorHex(n.color)}">${n.name} <span class="text-stone-600">Lv${n.level||level}</span></span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
-   ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${banner.t}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${banner.brief}</p></div>`:''}
+   ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${t(banner.t)}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${t(banner.brief)}</p></div>`:''}
    ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
    ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
-   ${toastT>0?`<div class="absolute top-28 left-1/2 -translate-x-1/2 mono text-xs text-amber-200 bg-black/60 px-3 py-1 rounded border border-stone-800">${toast}</div>`:''}
+   ${toastT>0?`<div class="absolute top-28 left-1/2 -translate-x-1/2 mono text-xs text-amber-200 bg-black/60 px-3 py-1 rounded border border-stone-800">${t(toast)}</div>`:''}
    ${invuln>0&&!w.over?`<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 serif italic text-rose-300 text-2xl">You fell. You rise again at Aldermere.</div>`:''}
    ${started&&!w.over?`<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-end gap-3">
      <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ Powers${points?` (${points})`:''}</button>
@@ -1133,8 +1399,8 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${tree}
    ${statusPanel}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">1–4 offer${w.debts.length?' · <span class="text-violet-300">P settle a debt</span>':''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">E to leave</p></div>`:''}
-   ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div>${npcDialogue}${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
-   ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] speak with <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${near.npc.role}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${near.s.label} — <span class="text-stone-500">${near.s.name}</span>`}</span></div>`:''}
+   ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${t(npcMenu.role)}</div></div></div>${npcDialogue}${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${t(npcMenu.quest.desc)}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ ${t('their charge is fulfilled')}</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] ${t('leave')}</div></div></div>`:''}
+   ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] ${t('speak with')} <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${t(near.npc.role)}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${t(near.s.label)} — <span class="text-stone-500">${t(near.s.name)}</span>`}</span></div>`:''}
    ${!npcMenu&&!near&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click move · Space strike · SHIFT roll · E speak/act · I status · K chronicle · seek the named folk of Aldermere</div>`:''}
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">
      <p class="serif text-5xl text-stone-100 tracking-[0.2em]">${t('THEODICY')}</p>
