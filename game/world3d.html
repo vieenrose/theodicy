@@ -356,6 +356,25 @@ const END_TEXT={
   oss :"You took Oss's hand. What the gods broke, you mend — the vale learns to forgive even heaven.",
   ithra:"You chose Ithra. Judgement falls clean and cold; the vale is ordered, lawful, and a little afraid.",
 };
+// ---- THE RIVAL: a recurring, escalating antagonist (not a one-off boss) — Kel's chosen instrument.
+// He appears twice and always escapes below a health floor (a JRPG staple: the villain who taunts and
+// flees), then returns a third time — at the covenant trial — as his true, unfleeing final form.
+let rival = { stage: 0 }, rivalMet = 0;
+const RIVAL_LINES = [
+  null,
+  { title:'The Ashen Wolf', brief:'"You bleed for a well? Kel bleeds for none." A rider watches from the ridge — then rides down to meet you.',
+    flee:'Kaine breaks off, bleeding, and laughs. "Next time, wolf-cub."' },
+  { title:'Kaine Returns', brief:'"Bran called me brother, once." The Ashen Wolf cuts down a straggler without looking at him.',
+    flee:'Kaine flees the field again — slower this time. Something in him is running out.' },
+  { title:'Kaine, Unmasked', brief:'"No more retreat. Kel is done waiting — and so am I." He sheds what was left of the man.',
+    flee:null },
+];
+function rivalFlee(e){ const L=RIVAL_LINES[e.rivalStage]; rival.stage=Math.max(rival.stage,e.rivalStage); rivalMet++;
+  toast=L.flee; toastT=4; addPiety('kel',0.5); }
+function spawnRivalEncounter(stage){ const T=ETYPES['kaine'+stage], rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.1));
+  const L=RIVAL_LINES[stage]; banner={t:L.title, brief:L.brief}; bannerT=5.5;
+  enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp, tname:T.name,
+    isRival:true, rivalStage:stage, fleeAt:Math.round(hp*0.35), cool:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); }
 // how each divine VERB lands as a crisis the player must answer (keyed to engine.js verbs)
 const CRISES={
   poison:{god:'vurm', title:'The Souring',     goal:'Cleanse the fouled well — tend it  [E]',   kind:'well'},
@@ -383,17 +402,19 @@ function onGodAct(act){                                   // THE hook: one real 
   if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast='Oss stays the ruin.'; toastT=2.5; }
   else if(act.verb==='bargain'||act.verb==='reveal'){ addPiety('ithra',0.4); }
   else if(CRISES[act.verb] && (!crisis||crisis.resolved) && !trialOn){ beginCrisis(act.verb, act); }
+  if((act.verb==='raid'||act.verb==='arm') && rival.stage<2 && !trialOn && !enemies.some(e=>e.isRival&&!e.dying)) spawnRivalEncounter(rival.stage+1);
 }
 function checkCrisis(){                                   // slay-crises clear when the vale is quiet
   if(crisis && !crisis.resolved && crisis.kind==='slay' && enemies.every(e=>e.dying)) resolveCrisis(); }
 function forceChampion(){ if(enemies.some(e=>e.boss&&!e.dying)) return; const T=ETYPES.champion, rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.12));
-  enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp,boss:true,tname:T.name,cool:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); }
+  enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp,boss:true,tname:T.name,
+    isRival:true, rivalStage:3, fleeAt:null, cool:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); rival.stage=3; }   // his true, unfleeing form
 function maybeOfferCovenant(){                            // earned, not handed: prove devotion first
   if(covenant||covenantOpen||trialOn||crisis) return;
   if(day>=3 && Math.max(...DEITY_IDS.map(d=>piety[d]))>=6) covenantOpen=true; }
 function chooseCovenant(i){ if(!covenantOpen) return; covenant=DEITY_IDS[i]; covenantOpen=false;
-  unlocked.add(COV_POWER[covenant]); banner={t:`Covenant with ${GNAME(covenant)}`, brief:'Their rival rises to test your oath.'}; bannerT=5;
-  trialOn=true; w.tension=Math.max(w.tension,72); forceChampion(); }   // the final trial
+  unlocked.add(COV_POWER[covenant]); banner={t:`Covenant with ${GNAME(covenant)}`, brief:RIVAL_LINES[3].brief}; bannerT=5;
+  trialOn=true; w.tension=Math.max(w.tension,72); forceChampion(); }   // the final trial — Kaine's last stand
 function endGame(won,kind){ w.over=true; w.won=won; endKind=kind; }
 function storyTick(){ if(!started||w.over) return; checkCrisis(); maybeOfferCovenant(); }
 // ---- awaken the real model: swap god.decide() to the in-browser 50M LLM (WebGPU→WASM, else keep heuristic) ----
@@ -424,7 +445,9 @@ const ETYPES = {
   raider:  { hp:26,  dmg:7,  spd:10, r:0.9, color:0xfb7185, xp:6,  scale:1.0, name:'raider' },
   wolf:    { hp:15,  dmg:5,  spd:17, r:0.7, color:0xd6a15a, xp:5,  scale:0.8, name:'wolf' },
   brute:   { hp:78,  dmg:16, spd:6,  r:1.3, color:0x9a3d3d, xp:18, scale:1.5, name:'brute' },
-  champion:{ hp:300, dmg:26, spd:7,  r:2.2, color:0xff3344, xp:90, scale:2.6, boss:true, name:'Champion of Kel' },
+  champion:{ hp:300, dmg:26, spd:7,  r:2.2, color:0xff3344, xp:90, scale:2.6, boss:true, name:'Kaine, the Ashen Wolf' },
+  kaine1:  { hp:60,  dmg:11, spd:9,  r:1.4, color:0x7a1f1f, xp:24, scale:1.7, name:'Kaine, the Ashen Wolf' },
+  kaine2:  { hp:140, dmg:18, spd:8,  r:1.7, color:0x9c2a2a, xp:50, scale:2.1, name:'Kaine, the Ashen Wolf' },
 };
 let fxT = 0, fxC = '#fff'; function fx3(c){ fxT = 0.3; fxC = c; }
 const xpNext = () => 20 + (level - 1) * 18;
@@ -540,6 +563,7 @@ function updateCombat(dt){
   if(heroHp<heroMax && clear && !relicHas('noRegen')) heroHp=Math.min(heroMax,heroHp+7*dt);   // Kel's Fury Stone forbids the mercy of rest
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
+    if(!e.dying && e.isRival && e.fleeAt!=null && e.hp<=e.fleeAt){ e.dying=0.5; gainXp(Math.round(e.xpv*0.5)); rivalFlee(e); continue; }   // he always escapes — until his true form
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
       { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
       if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
@@ -610,7 +634,7 @@ function restart(){
   baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
-  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0;   // revive the named folk for a new tale
+  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
 }
@@ -725,7 +749,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
       <div class="w-11 h-11 rounded border grid place-items-center relative ${ready?'':'opacity-50'}" style="border-color:${GODC[pw.god]}66;color:${GODC[pw.god]}"><span class="mono text-[10px] font-bold">${pw.key}</span>${cd>0?`<span class="absolute inset-0 grid place-items-center bg-black/65 rounded mono text-[10px] text-stone-200">${cd.toFixed(0)}</span>`:''}</div>
       <div class="mono text-[7px] text-stone-500 mt-0.5">${has?pw.name:'locked'}</div></button>`; }).join('');
   const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="closetree"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" data-act="stop"><div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Covenant</h2><span class="mono text-xs text-amber-300">${points} point${points!==1?'s':''}</span></div><div class="grid grid-cols-4 gap-3">${POWER_KEYS.map(k=>{const pw=POWERS[k],has=unlocked.has(k);return `<div class="border border-stone-800 rounded p-3 text-center"><div class="serif text-sm" style="color:${GODC[pw.god]}">${pw.name}${has?' ✓':''}</div><div class="mono text-[8px] text-stone-600 my-1">${pw.desc}<br/>${pw.cost} mana · [${pw.key}]</div>${has?'':`<button data-act="unlock:${k}" ${points>=pw.pts?'':'disabled'} class="mono text-[9px] px-2 py-0.5 rounded border ${points>=pw.pts?'border-stone-500 text-stone-200 hover:bg-stone-800':'border-stone-800 text-stone-600'}">unlock · ${pw.pts}pt</button>`}</div>`;}).join('')}</div><p class="serif italic text-stone-500 text-xs mt-4">Slay Kel's raiders for XP; each level grants a Covenant point. Unlock a god's power, wield it with its key.</p><button data-act="closetree" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (C)</button></div></div>` : '';
-  const boss = enemies.find(e=>e.boss && !e.dying);
+  const boss = enemies.find(e=>(e.boss||e.isRival) && !e.dying);
   const hitEls = hits.map(h=>{ const p=h.pos.clone().project(camera); if(p.z>1) return ''; const x=((p.x*0.5+0.5)*innerWidth)|0, y=((-p.y*0.5+0.5)*innerHeight)|0;
     return `<div class="absolute mono font-bold ${h.crit?'text-xl':'text-base'}" style="left:${x}px;top:${y}px;transform:translate(-50%,-50%);color:${h.crit?'#fbbf24':'#fda4af'};opacity:${Math.min(1,h.t).toFixed(2)}">${h.text}${h.crit?'!':''}</div>`; }).join('');
   const relicBar = `<div class="flex gap-1.5">${relics.map(id=>{const r=RELICS[id];return `<div class="w-9 h-9 rounded border grid place-items-center" style="border-color:${TIER_COLOR[r.tier]}88" title="${r.name}: ${r.desc}"><span class="mono text-[8px]" style="color:${TIER_COLOR[r.tier]}">${r.name.slice(0,2)}</span></div>`;}).join('')}${Array.from({length:relicSlots-relics.length}).map(()=>`<div class="w-9 h-9 rounded border border-dashed border-stone-800"></div>`).join('')}</div>`;
@@ -782,6 +806,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <p class="mono text-[10px] uppercase tracking-[0.35em] ${w.won?'text-amber-400':'text-rose-400'}">${w.won?'The Tale Is Told':'The Vale Falls'}</p>
      <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?PANTHEON[endKind].name.split(',')[0]+"'s Vale":'The vale is empty.'}</p>
      <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?(END_TEXT[endKind]||'The vale endures under your watch.'):'Aldermere starved before you could name a god to save it.'}</p>
+     ${rival.stage>=3?`<p class="serif italic text-rose-200/90 text-[13px] mt-2 leading-snug">${rivalMet>=2?'You had crossed blades with Kaine twice before he stopped running. The third time, he did not.':rivalMet===1?'You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.':'A stranger called himself Kaine, and made his last stand where the ridge meets the vale.'}</p>`:''}
      <p class="serif italic text-[13px] mt-3 leading-snug">${NPCS.filter(x=>x.alive).length?`<span class="text-stone-400">Still drawing breath:</span> <span class="text-emerald-300">${NPCS.filter(x=>x.alive).map(x=>x.name).join(', ')}</span>`:'<span class="text-rose-300">None of the named folk survived.</span>'}${lostFolk.length?` <span class="text-stone-500">·</span> <span class="text-rose-400">lost: ${lostFolk.join(', ')}</span>`:''}</p>
      <p class="mono text-[11px] text-stone-500 mt-3">level ${level} · fell ${deaths}× · ${day} days · read ${correct}/${reads.length} hands · ${NPCS.filter(x=>x.state==='done').length}/${NPCS.length} charges kept</p>
      <button data-act="restart" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin anew ▸ (X)</button></div></div>`:''}`;
