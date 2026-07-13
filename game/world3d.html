@@ -229,27 +229,46 @@ for (const [id, s] of Object.entries(SITES)) {
 // a cloaked wayfarer, layered primitives that read as a person — not a capsule
 const hero = new THREE.Group();
 const _hm = (c,rg,mt)=>new THREE.MeshStandardMaterial({color:c,roughness:rg??0.8,metalness:mt||0});
-const legL = new THREE.Mesh(new THREE.BoxGeometry(0.7,2.3,0.7), _hm(0x3b2a1c)); legL.position.set(-0.5,1.15,0); hero.add(legL);
-const legR = new THREE.Mesh(new THREE.BoxGeometry(0.7,2.3,0.7), _hm(0x3b2a1c)); legR.position.set(0.5,1.15,0); hero.add(legR);
-const body = new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.25,2.3,12), _hm(0x5b6472,0.7,0.15)); body.position.y=3.35; hero.add(body); // torso — flashes on hurt
-const chest = new THREE.Mesh(new THREE.CapsuleGeometry(1.02,0.9,4,10), _hm(0x9aa3ad,0.4,0.75)); chest.scale.set(1,0.85,0.62); chest.position.y=3.7; hero.add(chest);
-const armL = new THREE.Mesh(new THREE.BoxGeometry(0.5,2.0,0.5), _hm(0x4a5360,0.7)); armL.position.set(-1.35,3.35,0); hero.add(armL);
-const armR = new THREE.Mesh(new THREE.BoxGeometry(0.5,2.0,0.5), _hm(0x4a5360,0.7)); armR.position.set(1.35,3.35,0); hero.add(armR);
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.82,14,14), _hm(0xcaa47a,0.9)); head.position.y=5.05; hero.add(head);
-const hood = new THREE.Mesh(new THREE.ConeGeometry(1.12,1.7,12), _hm(0x3b2f4a,0.95)); hood.position.y=5.35; hero.add(hood);
-const cloak = new THREE.Mesh(new THREE.PlaneGeometry(2.3,3.6), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:1,side:THREE.DoubleSide})); cloak.position.set(0,3.3,-0.82); hero.add(cloak);
-const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16,2.8,0.5), _hm(0xd7dde3,0.3,0.9)); blade.position.set(1.9,3.8,0.35); hero.add(blade);
-const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.22,0.24), _hm(0x2a1c10)); hilt.position.set(1.9,2.4,0.35); hero.add(hilt);
+// ---- a shared humanoid limb-builder: tapered limbs + joint spheres + a shoulders-wide/waist-narrow
+// torso read as a BODY, not a stack of rigid boxes — used by the hero, NPCs, villagers, and humanoid
+// enemies alike, so fixing "everyone looks like an android" fixes it everywhere at once.
+function humanoidBody(g, S, skinColor, clothColor){
+  const mat=(c,rg,mt)=>new THREE.MeshStandardMaterial({color:c, roughness:rg??0.88, metalness:mt||0});
+  for(const sx of [-1,1]){
+    const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.30*S,0.23*S,1.05*S,8), mat(clothColor)); thigh.position.set(sx*0.32*S,1.55*S,0); g.add(thigh);
+    const knee =new THREE.Mesh(new THREE.SphereGeometry(0.19*S,8,8), mat(clothColor)); knee.position.set(sx*0.32*S,1.05*S,0); g.add(knee);
+    const shin =new THREE.Mesh(new THREE.CylinderGeometry(0.21*S,0.14*S,0.9*S,8), mat(clothColor,0.9)); shin.position.set(sx*0.32*S,0.62*S,0); g.add(shin);
+    const foot =new THREE.Mesh(new THREE.BoxGeometry(0.26*S,0.2*S,0.5*S), mat(0x1c130c,0.95)); foot.position.set(sx*0.32*S,0.11*S,0.11*S); g.add(foot);
+  }
+  const hip  =new THREE.Mesh(new THREE.CylinderGeometry(0.56*S,0.48*S,0.55*S,10), mat(clothColor)); hip.position.y=2.15*S; g.add(hip);
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.72*S,0.54*S,1.5*S,10), mat(clothColor)); torso.position.y=3.0*S; g.add(torso);   // WIDE at shoulders, narrow at waist — a real torso silhouette
+  const neck =new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.24*S,0.32*S,8), mat(skinColor,0.9)); neck.position.y=3.9*S; g.add(neck);
+  const head =new THREE.Mesh(new THREE.SphereGeometry(0.54*S,12,12), mat(skinColor,0.9)); head.scale.set(0.92,1.08,0.9); head.position.y=4.42*S; g.add(head);
+  for(const sx of [-1,1]){
+    const shoulder=new THREE.Mesh(new THREE.SphereGeometry(0.24*S,8,8), mat(clothColor)); shoulder.position.set(sx*0.86*S,3.55*S,0); g.add(shoulder);
+    const upArm=new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.16*S,0.82*S,8), mat(clothColor)); upArm.position.set(sx*0.86*S,3.15*S,0); g.add(upArm);
+    const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.165*S,8,8), mat(clothColor)); elbow.position.set(sx*0.86*S,2.76*S,0); g.add(elbow);
+    const loArm=new THREE.Mesh(new THREE.CylinderGeometry(0.155*S,0.115*S,0.78*S,8), mat(skinColor,0.9)); loArm.position.set(sx*0.86*S,2.36*S,0); g.add(loArm);
+    const hand =new THREE.Mesh(new THREE.SphereGeometry(0.135*S,8,8), mat(skinColor,0.9)); hand.position.set(sx*0.86*S,1.95*S,0); g.add(hand);
+  }
+  return { hip, torso, neck, head };
+}
+const hbParts = humanoidBody(hero, 1, 0xcaa47a, 0x4a5360);
+const body = hbParts.torso;                            // torso — flashes on hurt
+const head = hbParts.head;
+const hood = new THREE.Mesh(new THREE.ConeGeometry(0.68,1.15,12), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:0.95})); hood.position.y=4.72; hero.add(hood);
+const cloak = new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:1,side:THREE.DoubleSide})); cloak.position.set(0,3.1,-0.62); hero.add(cloak);
+const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85})); blade.position.set(1.45,2.9,0.25); hero.add(blade);
+const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.16,0.18), new THREE.MeshStandardMaterial({color:0x2a1c10,roughness:0.9})); hilt.position.set(1.45,1.85,0.25); hero.add(hilt);
 hero.position.set(8,0,8); scene.add(hero);
 
 // ---- villagers: small autonomous agents wandering Aldermere ----
 const villagers = [];
 for (let i=0;i<5;i++){
   const m = new THREE.Group();
-  const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.7,1.4,3,6), new THREE.MeshStandardMaterial({color:0x6b5a45})); b.position.y=1.4; m.add(b);
-  const h = new THREE.Mesh(new THREE.SphereGeometry(0.6,8,8), new THREE.MeshStandardMaterial({color:0xc9b28f})); h.position.y=2.6; m.add(h);
+  const { torso } = humanoidBody(m, 0.82, 0xc9b28f, 0x6b5a45);
   m.position.set(8 + (Math.random()*12-6), 0, 8 + (Math.random()*12-6)); scene.add(m);
-  villagers.push({ mesh:m, tgt:null, seed:Math.random()*6.28 });
+  villagers.push({ mesh:m, body:torso, tgt:null, seed:Math.random()*6.28 });
 }
 
 // ---- NAMED FOLK OF ALDERMERE: the social pillar — talk (E), take their charge, be remembered ----
@@ -350,11 +369,10 @@ function makeNameplate(text, hex){
 function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
 function buildNPC(n){
   const g=new THREE.Group();
-  const robe=new THREE.Mesh(new THREE.ConeGeometry(1.3,3.4,8), new THREE.MeshStandardMaterial({color:n.color, roughness:0.85})); robe.position.y=1.7; g.add(robe);
-  const head=new THREE.Mesh(new THREE.SphereGeometry(0.72,12,12), new THREE.MeshStandardMaterial({color:0xcaa47a, roughness:0.9})); head.position.y=3.7; g.add(head);
+  const { torso } = humanoidBody(g, 0.92, 0xcaa47a, n.color);
   g.add(makeNameplate(n.name, npcColorHex(n.color)));
   g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
-  n.mesh=g; n.body=robe; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
+  n.mesh=g; n.body=torso; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
   n.trust=0; n.asked=[]; n._topic=null; n._aside='';   // relationship + dialogue-topic state
 }
 NPCS.forEach(buildNPC);
@@ -722,14 +740,12 @@ function enemyMesh(x,z,T){ const m=new THREE.Group(); const S=T.scale;
     for(const sx of [-1,1]) for(const sz of [-0.7,0.9]){ const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.16*S,0.12*S,1.1*S), mat(0x2a1a12)); lg.position.set(sz*S,0.55*S,sx*0.42*S); m.add(lg); }
     const tl=new THREE.Mesh(new THREE.ConeGeometry(0.22*S,1.3*S,6), mat()); tl.rotation.z=Math.PI/2.6; tl.position.set(-1.4*S,1.35*S,0); m.add(tl);
   } else {                                              // a humanoid foe — raider / brute / champion
-    for(const sx of [-1,1]){ const lg=new THREE.Mesh(new THREE.BoxGeometry(0.46*S,1.7*S,0.46*S), mat(0x2a1a12)); lg.position.set(sx*0.44*S,0.85*S,0); m.add(lg); }
-    const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.82*S,1.02*S,1.9*S,9), mat()); torso.position.y=2.6*S; m.add(torso);
-    for(const sx of [-1,1]){ const ar=new THREE.Mesh(new THREE.BoxGeometry(0.4*S,1.7*S,0.4*S), mat()); ar.position.set(sx*1.16*S,2.65*S,0); m.add(ar); }
-    const hd=new THREE.Mesh(new THREE.SphereGeometry(0.58*S,10,10), mat(0x6b4636)); hd.position.y=3.85*S; m.add(hd);
-    if(T.boss){                                         // Champion of Kel: horns + greatsword
-      for(const sx of [-1,1]){ const horn=new THREE.Mesh(new THREE.ConeGeometry(0.18*S,0.9*S,6), mat(0xe5e0d5)); horn.position.set(sx*0.42*S,4.45*S,0); horn.rotation.z=sx*0.5; m.add(horn); }
-      const gs=new THREE.Mesh(new THREE.BoxGeometry(0.28*S,3.8*S,0.6*S), mat(0xb7bdc4)); gs.position.set(1.5*S,3.2*S,0.2*S); m.add(gs);
-    } else { const wpn=new THREE.Mesh(new THREE.BoxGeometry(0.2*S,2.1*S,0.42*S), mat(0x8a8f96)); wpn.position.set(1.35*S,2.8*S,0.2*S); m.add(wpn); }
+    const HS = S*1.35;                                  // *1.35: enemyMesh's old scale baked in bigger proportions than the hero's
+    humanoidBody(m, HS, 0x6b4636, T.color);
+    if(T.boss){                                         // Champion of Kel: horns + greatsword, sized off the NEW head/shoulder height
+      for(const sx of [-1,1]){ const horn=new THREE.Mesh(new THREE.ConeGeometry(0.18*S,0.9*S,6), mat(0xe5e0d5)); horn.position.set(sx*0.42*HS,6.25*HS,0); horn.rotation.z=sx*0.5; m.add(horn); }
+      const gs=new THREE.Mesh(new THREE.BoxGeometry(0.28*S,3.8*S,0.6*S), mat(0xb7bdc4)); gs.position.set(1.15*HS,3.9*HS,0.2*S); m.add(gs);
+    } else { const wpn=new THREE.Mesh(new THREE.BoxGeometry(0.2*S,2.1*S,0.42*S), mat(0x8a8f96)); wpn.position.set(1.0*HS,3.4*HS,0.2*S); m.add(wpn); }
   }
   m.position.set(x,0,z); scene.add(m); return m; }
 function pickType(){
@@ -979,7 +995,7 @@ function animate(){
     const spd = flee ? 15 : thirst ? 9 : 6.5;
     const dir = vlg.tgt.clone().sub(vlg.mesh.position); dir.y = 0; const d = dir.length();
     if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, spd*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
-    vlg.mesh.children[0].material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
+    vlg.body.material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
   }
   // named folk: bob gently; glow amber when their god's crisis is upon them, green when their charge is met
   for(const n of NPCS){ if(!n.alive||!n.body||n.ally) continue;   // allies are driven by updateParty
