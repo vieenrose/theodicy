@@ -214,25 +214,30 @@ const NPCS = [
     say:{ idle:'The well tastes of copper and old grudge. Vurm counts every cup we drew untended. Cleanse it, and I will rest easier.',
           active:'Still it runs foul. Please — draw the cover, clear the silt.',
           done:'The water runs clear again. Bless your hands. Vurm is quiet… for now.',
-          crisis:'The well sours as we speak — go, before the children drink!' } },
+          crisis:'The well sours as we speak — go, before the children drink!',
+          covenant:c=>c==='vurm'?'Then the water remembers you kindly. I always knew it would be Vurm.':'Not Vurm? …well. The well will keep regardless. I hope you chose well.' } },
   { id:'oda', name:'Oda', role:'a young mother', god:'oss', color:0x34d399, pos:[13,0,15],
     quest:{ desc:'Bring the village respite  [rest Aldermere, or Mend]', kind:'mercy' },
     say:{ idle:"My boy hasn't woken clear-eyed in days. If Oss still leans kind, let the village rest a while.",
           active:'He is weaker today. We need respite — rest us, or a mending hand.',
           done:'He smiled this morning. Oss’s mercy moves through you. Thank you.',
-          crisis:'Everyone is afraid. Steady us — we cannot hold if hope goes.' } },
+          crisis:'Everyone is afraid. Steady us — we cannot hold if hope goes.',
+          covenant:c=>c==='oss'?'Oss, then. My boy will grow up gentler for it. Thank you.':"Not Oss… I understand. Mercy isn't the only shield a home needs." } },
   { id:'bran', name:'Bran', role:'the watchman', god:'kel', color:0xfb7185, pos:[36,0,4],
     quest:{ desc:'Break the ridge-raiders  [slay 4]', kind:'slay', n:4 },
     say:{ idle:"Kel is not prayed away, only met. Cut down four of his dogs and the ridge learns fear.",
           active:'Fewer than four still breathe up there. Keep at it.',
           done:'Four cold on the slope. Kel respects a blade that answers. Well fought.',
-          crisis:"They are coming NOW — meet them, quickly!" } },
+          crisis:"They are coming NOW — meet them, quickly!",
+          kaineKnown:'The Ashen Wolf, twice now. I know that blade-work — I taught it to him, once. Finish what I couldn\'t.',
+          covenant:c=>c==='kel'?"Kel, then. Good. The ridge respects nothing else — and neither did Kaine, in the end.":'Not Kel… softer choice. I hope it holds when the next blade comes down from the ridge.' } },
   { id:'sela', name:'Sela', role:'the shrine-tender', god:'ithra', color:0xa78bfa, pos:[58,0,33],
     quest:{ desc:"Read a god's hand truly  [name one omen right]", kind:'read' },
     say:{ idle:'Ithra keeps a ledger, and so must you. When the next omen comes, name whose hand it was — truly.',
           active:'The signs still puzzle you. Watch closer; name the next one right.',
           done:'You saw the hand behind the sign. Ithra marks you as one who reckons true.',
-          crisis:'A judgement comes. Read it rightly, or we answer a debt not ours.' } },
+          crisis:'A judgement comes. Read it rightly, or we answer a debt not ours.',
+          covenant:c=>c==='ithra'?'Ithra keeps the ledger balanced. A fitting hand to trust — the debts are yours to weigh now.':'Not Ithra? The ledger will still be kept — just not by the hand you chose.' } },
 ];
 function makeNameplate(text, hex){
   const cv=document.createElement('canvas'); cv.width=256; cv.height=64; const x=cv.getContext('2d');
@@ -252,7 +257,10 @@ function buildNPC(n){
 }
 NPCS.forEach(buildNPC);
 let npcMenu=null, lostFolk=[], npcPeril=[6,4,2];   // as Aldermere empties, its folk are lost
-function npcLine(n){ if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
+function npcLine(n){                                      // the world remembers: covenant + the antagonist arc override the usual state lines
+  if(covenant && n.say.covenant) return n.say.covenant(covenant);
+  if(n.id==='bran' && rival.stage>=2 && n.say.kaineKnown) return n.say.kaineKnown;
+  if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
 function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } npcMenu=n; }
 function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
   toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
@@ -607,8 +615,9 @@ function dodge(){ if(dodgeCd>0||w.over||!started) return; dodgeCd=1.0; dodgeT=0.
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
-function nearestThing(){ let best=null,bd=1e9;   // NPC or site — whichever is closest wins the [E] key
-  for(const n of NPCS){ if(!n.alive||n.ally) continue; const d=Math.hypot(hero.position.x-n.pos[0], hero.position.z-n.pos[2]); if(d<11 && d<bd){bd=d; best={type:'npc', npc:n};} }
+function nearestThing(){ let best=null,bd=1e9;   // NPC, an ally at your side, or a site — whichever is closest wins the [E] key
+  for(const n of NPCS){ if(!n.alive) continue; const rad=n.ally?10:11;   // allies settle ~7u out in formation; reach must cover that
+    const d=Math.hypot(hero.position.x-n.mesh.position.x, hero.position.z-n.mesh.position.z); if(d<rad && d<bd){bd=d; best={type:'npc', npc:n};} }
   for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d; best={type:'site', id, s};} }
   return best; }
 function interact(){ if(w.over||!started||covenantOpen) return;
@@ -675,7 +684,7 @@ function animate(){
       const ddx=moveTarget.x-hero.position.x, ddz=moveTarget.z-hero.position.z, d=Math.hypot(ddx,ddz);
       if(d>1.3){ hero.position.x+=ddx/d*spd*dt; hero.position.z+=ddz/d*spd*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
-  if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.pos[0],hero.position.z-npcMenu.pos[2])>13)) npcMenu=null;   // walk away ends the talk
+  if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.mesh.position.x,hero.position.z-npcMenu.mesh.position.z)>(npcMenu.ally?15:13))) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
   if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
   if(started && !w.over) storyTick();                                 // advance the emergent campaign
