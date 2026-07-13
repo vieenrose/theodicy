@@ -454,10 +454,35 @@ function beginCrisis(verb, act){ const c=CRISES[verb]; if(!c) return;
 function resolveCrisis(){ if(!crisis||crisis.resolved) return; crisis.resolved=true; addPiety(crisis.god,1.5);
   toast=`${crisis.title} — answered. ${GNAME(crisis.god)} takes note.`; toastT=3;
   const rec=chronicle.find(r=>r.crisis===crisis.title&&!r.done); if(rec) rec.done=true; crisis=null; }
+// ---- PORTENTS: when the AWAKENED model speaks, its own words can cause something — not just narrate the
+// act the oracle already chose. Small models can't produce reliable structure (the project's whole thesis),
+// so we don't ask for JSON or a command grammar out of the prophecy — a loose keyword scan over its free-form
+// text is the honest way to let real confabulation have real consequence. Never runs on the canned heuristic
+// omens (there's nothing genuinely NEW being said there to react to).
+let lastPortentT = -999;
+const PORTENT_THEMES = [
+  { god:'vurm', re:/\b(water|well|thirst|drought|river|rain|flood|drink)\w*/i,
+    apply(){ dropLoot({x:SITES.well.pos[0], z:SITES.well.pos[2]}); return "The well answers the prophecy — something glimmers in its water."; } },
+  { god:'kel', re:/\b(blade|blood|war|ridge|raid|wolf|steel|fire|ash|blaze)\w*/i,
+    apply(){ spawnEnemy(); if(Math.random()<0.4) spawnEnemy(); return "The prophecy is made flesh — steel answers from the ridge."; } },
+  { god:'oss', re:/\b(mercy|gentle|heal|kind|hope|rest|comfort|peace)\w*/i,
+    apply(){ w.village.morale=Math.min(100,w.village.morale+8); dropLoot({x:SITES.village.pos[0], z:SITES.village.pos[2]}); return "A quiet mercy settles over Aldermere, just as the sign promised."; } },
+  { god:'ithra', re:/\b(ledger|debt|judge|law|balance|reckon|owe|weigh)\w*/i,
+    apply(){ addPiety('ithra',0.6); w.tension=Math.max(0,w.tension-4); return "The ledger tilts — Ithra's word settles something unseen."; } },
+];
+function checkPortent(act){
+  if(godBackend!=='supra' || !act.omen) return;            // only the awakened model's OWN words can trigger this
+  if(clock.elapsedTime - lastPortentT < 15) return;         // a real event, not background noise
+  const text = act.omen.toLowerCase();
+  for(const th of PORTENT_THEMES){ if(th.re.test(text)){
+    lastPortentT = clock.elapsedTime; const line = th.apply();
+    banner = {t:'A Sign Made Real', brief:line}; bannerT = 5; addPiety(th.god, 0.3); return; } }
+}
 function onGodAct(act){                                   // THE hook: one real divine choice → story
   chronicle.unshift({turn:act.turn, god:act.deity, verb:act.verb, omen:act.omen,
                      crisis:(CRISES[act.verb]||{}).title, done:false});
   if(chronicle.length>24) chronicle.pop();
+  checkPortent(act);
   if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast='Oss stays the ruin.'; toastT=2.5; }
   else if(act.verb==='reveal'){ addPiety('ithra',0.4); }
   else if(CRISES[act.verb] && (!crisis||crisis.resolved) && !trialOn){ beginCrisis(act.verb, act); }
