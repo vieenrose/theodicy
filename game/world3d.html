@@ -404,6 +404,7 @@ const CRISES={
   arm   :{god:'kel',  title:'The Whetstone',   goal:'Thin the ridge before it swells — slay raiders', kind:'slay'},
   betray:{god:'kel',  title:'The Broken Watch',goal:'Stand firm — fortify the Palisade  [E]',   kind:'wall'},
   exact :{god:'ithra',title:'The Reckoning',   goal:"Answer Ithra — read the next omen's hand truly", kind:'read'},
+  bargain:{god:'ithra',title:'The Bargain',    goal:'Ithra holds a debt against you — settle it  [P]', kind:'debt'},
 };
 function startGame(cid){ calling=cid; started=true; unlocked=new Set([CALLINGS[cid].power]); piety[cid]+=2;
   banner={t:'The Vale of Aldermere', brief:CALLINGS[cid].blurb}; bannerT=6; }
@@ -420,7 +421,7 @@ function onGodAct(act){                                   // THE hook: one real 
                      crisis:(CRISES[act.verb]||{}).title, done:false});
   if(chronicle.length>24) chronicle.pop();
   if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast='Oss stays the ruin.'; toastT=2.5; }
-  else if(act.verb==='bargain'||act.verb==='reveal'){ addPiety('ithra',0.4); }
+  else if(act.verb==='reveal'){ addPiety('ithra',0.4); }
   else if(CRISES[act.verb] && (!crisis||crisis.resolved) && !trialOn){ beginCrisis(act.verb, act); }
   if((act.verb==='raid'||act.verb==='arm') && rival.stage<2 && !trialOn && !enemies.some(e=>e.isRival&&!e.dying)) spawnRivalEncounter(rival.stage+1);
 }
@@ -618,6 +619,8 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
   if(KEYMAP[k]) cast(KEYMAP[k]);                 // Q/R/F/V → god-powers
   if(k==='c') showTree = !showTree;              // Covenant board
   if(k==='k') showChron = !showChron;            // Chronicle of the vale
+  if(k==='p' && !w.over && w.debts.length) doAct({action:'pay_debt'});   // settle a debt Ithra holds
+  if(k==='0' && shrineMenu && !w.sites.shrine.desecrated) doAct({action:'desecrate'});   // a dark bargain — permanent
   if(k==='m') AUDIO.toggleMute();                // mute
   if(['1','2','3','4'].includes(k)){ if(covenantOpen) chooseCovenant(+k-1); else if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
   if(k==='x'&&w.over) restart();                 // (R is a power key now)
@@ -642,7 +645,9 @@ function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity);   
   if(a.action==='tend_well'){ addPiety('vurm',0.5); if(crisis&&crisis.kind==='well') resolveCrisis(); completeNPC(npcOf('well')); }
   else if(a.action==='harvest'){ if(crisis&&crisis.kind==='fields') resolveCrisis(); else addPiety('vurm',0.3); }
   else if(a.action==='fortify'){ if(a.warcamp) addPiety('kel',0.5); else if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
-  else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); } }
+  else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); }
+  else if(a.action==='pay_debt'){ if(crisis&&crisis.kind==='debt') resolveCrisis(); else addPiety('ithra',0.6); toast='A debt is settled — Ithra marks the ledger even.'; toastT=2.5; }
+  else if(a.action==='desecrate'){ toast='The shrine comes apart under your hands. Every god remembers this.'; toastT=4; fx3('#7a1f1f'); } }
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; const ok=guess===pending.actual; reads.push({correct:ok});
   if(ok){ addPiety('ithra',1); if(crisis&&crisis.kind==='read') resolveCrisis(); completeNPC(npcOf('read')); }   // reading a god truly is Ithra's work
   pending={...pending,result:{guess,correct:ok}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
@@ -788,6 +793,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
        <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water}</span>
        <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${Math.round(w.tension)}</span>
        <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
+       ${w.debts.length?`<span class="mono text-xs text-violet-300" title="Ithra holds a debt against you">◈ debt ${w.debts.length} <span class="text-stone-500">[P]</span></span>`:''}
      </div>
      <span class="flex gap-3 items-center"><button data-act="mind" class="pointer-events-auto mono text-[10px] ${godBackend==='supra'?'text-violet-400':'text-stone-500'} hover:text-stone-200" title="the god's mind: heuristic oracle, or awaken an in-browser LLM">${godLoading?`◍ waking ${godName} ${godPct}%`:(godBackend==='supra'?`◈ ${godName}`:'◇ awaken mind')}</button><button data-act="chron" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="chronicle (K)">📜</button><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
    </div>
@@ -809,7 +815,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    </div>`:''}
    ${relicOffer?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="max-w-xl w-full px-6 text-center"><p class="mono text-[10px] uppercase tracking-[0.35em]" style="color:${TIER_COLOR[RELICS[relicOffer].tier]}">a relic — ${RELICS[relicOffer].tier}</p><p class="serif text-3xl text-stone-100 mt-2">${RELICS[relicOffer].name}</p><p class="serif italic text-stone-400 mt-1 mb-5">${RELICS[relicOffer].desc}</p><p class="mono text-[10px] text-stone-500 mb-2">your relics are full (${relicSlots}) — bind it in place of one, or leave it</p><div class="flex flex-wrap gap-2 justify-center">${relics.map((id,i)=>{const r=RELICS[id];return `<button data-act="relicswap:${i}" class="pointer-events-auto text-left w-48 p-2.5 rounded border hover:bg-stone-900" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></button>`;}).join('')}</div><button data-act="relicswap:-1" class="pointer-events-auto mono text-xs mt-4 px-4 py-2 rounded border border-stone-700 text-stone-400 hover:bg-stone-900">leave it behind</button></div></div>`:''}
    ${tree}
-   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
+   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">1–4 offer${w.debts.length?' · <span class="text-violet-300">P settle a debt</span>':''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">E to leave</p></div>`:''}
    ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div><p class="serif italic text-stone-200 text-[15px] leading-snug">“${npcLine(npcMenu)}”</p>${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
    ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] speak with <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${near.npc.role}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${near.s.label} — <span class="text-stone-500">${near.s.name}</span>`}</span></div>`:''}
    ${!npcMenu&&!near&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click move · Space strike · SHIFT roll · E speak/act · K chronicle · seek the named folk of Aldermere</div>`:''}
