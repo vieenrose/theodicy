@@ -117,6 +117,19 @@ document.body.appendChild(renderer.domElement);
 renderer.domElement.tabIndex = 0;                        // focusable, so keys reach us even when embedded
 addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
+// A GPU-process crash (a known Chromium risk when a WebGPU device is requested alongside an
+// already-active WebGL context, e.g. by 'awaken the divine mind') is invisible to try/catch —
+// it silently kills the canvas, leaving a permanently black page with no explanation. Catch it.
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  contextLost = true;                                     // stop animate()/drawUI() from immediately overwriting this screen
+  document.getElementById('ui').innerHTML = `<div class="fixed inset-0 bg-black grid place-items-center pointer-events-auto p-6"><div class="text-center max-w-md">
+    <p class="serif text-2xl text-stone-200 mb-2">The vale flickers out.</p>
+    <p class="serif italic text-stone-500 text-sm mb-4">Your browser's graphics context was lost — often triggered by 'awaken the divine mind' on some GPUs. Your progress was last autosaved a few seconds ago.</p>
+    <button onclick="location.reload()" class="mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">reload ▸</button>
+  </div></div>`;
+}, false);
+
 // ---- RTS click-to-move: left-click the ground to walk there; click a foe to attack-move ----
 const _ray = new THREE.Raycaster(), _ndc = new THREE.Vector2(), _plane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
 let moveTarget = null, attackTarget = null, atkTimer = 0, marker = null;
@@ -413,10 +426,10 @@ const CRISES={
 function startGame(cid){ calling=cid; started=true; powerRank={mend:0,flood:0,smite:0,fury:0}; powerRank[CALLINGS[cid].power]=1; piety[cid]+=2;
   banner={t:'The Vale of Aldermere', brief:CALLINGS[cid].blurb}; bannerT=6; }
 function addPiety(god,n){ piety[god]=Math.max(0,Math.min(10, piety[god]+n)); }
-function spawnWave(n){ for(let i=0;i<n;i++) spawnEnemy(); }
+function spawnWave(n, tag){ for(let i=0;i<n;i++) spawnEnemy(tag); }
 function beginCrisis(verb, act){ const c=CRISES[verb]; if(!c) return;
   crisis={...c, verb, resolved:false}; banner={t:c.title, brief:act.omen||''}; bannerT=5;
-  if(c.kind==='slay'){ w.tension=Math.max(w.tension,55); spawnWave(2+Math.floor(day/3)); } }
+  if(c.kind==='slay'){ w.tension=Math.max(w.tension,55); const n=2+Math.floor(day/3); crisis.pending=n; spawnWave(n, crisis); } }   // only THIS wave counts toward resolution, not ambient spawns
 function resolveCrisis(){ if(!crisis||crisis.resolved) return; crisis.resolved=true; addPiety(crisis.god,1.5);
   toast=`${crisis.title} — answered. ${GNAME(crisis.god)} takes note.`; toastT=3;
   const rec=chronicle.find(r=>r.crisis===crisis.title&&!r.done); if(rec) rec.done=true; crisis=null; }
@@ -429,8 +442,6 @@ function onGodAct(act){                                   // THE hook: one real 
   else if(CRISES[act.verb] && (!crisis||crisis.resolved) && !trialOn){ beginCrisis(act.verb, act); }
   if((act.verb==='raid'||act.verb==='arm') && rival.stage<2 && !trialOn && !enemies.some(e=>e.isRival&&!e.dying)) spawnRivalEncounter(rival.stage+1);
 }
-function checkCrisis(){                                   // slay-crises clear when the vale is quiet
-  if(crisis && !crisis.resolved && crisis.kind==='slay' && enemies.every(e=>e.dying)) resolveCrisis(); }
 function forceChampion(){ if(enemies.some(e=>e.boss&&!e.dying)) return; const T=ETYPES.champion, rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.12));
   enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp,boss:true,tname:T.name,
     isRival:true, rivalStage:3, fleeAt:null, cool:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); rival.stage=3; }   // his true, unfleeing form
@@ -441,7 +452,7 @@ function chooseCovenant(i){ if(!covenantOpen) return; covenant=DEITY_IDS[i]; cov
   if(!powerRank[COV_POWER[covenant]]) powerRank[COV_POWER[covenant]]=1; banner={t:`Covenant with ${GNAME(covenant)}`, brief:RIVAL_LINES[3].brief}; bannerT=5;
   trialOn=true; w.tension=Math.max(w.tension,72); forceChampion(); }   // the final trial — Kaine's last stand
 function endGame(won,kind){ w.over=true; w.won=won; endKind=kind; clearSave(); }   // the tale is finished — nothing left to resume
-function storyTick(){ if(!started||w.over) return; checkCrisis(); maybeOfferCovenant(); }
+function storyTick(){ if(!started||w.over) return; maybeOfferCovenant(); }   // slay-crises now resolve inline at the killing blow (see spawnWave/beginCrisis)
 // ---- awaken the real model: swap god.decide() to the in-browser 50M LLM (WebGPU→WASM, else keep heuristic) ----
 async function awakenModel(){
   if(godLoading || godBackend==='supra') return;
@@ -572,10 +583,10 @@ function pickType(){
   if(r<0.34) return 'wolf';
   return 'raider';
 }
-function spawnEnemy(){ const T=ETYPES[pickType()], rp=SITES.ridge.pos, a=Math.random()*6.28;
+function spawnEnemy(tag){ const T=ETYPES[pickType()], rp=SITES.ridge.pos, a=Math.random()*6.28;
   const hp=Math.round(T.hp*(1+level*0.1));
   enemies.push({ mesh:enemyMesh(rp[0]+Math.cos(a)*20, rp[2]+Math.abs(Math.sin(a))*14, T),
-    hp, maxHp:hp, dmg:T.dmg, spd:T.spd, r:T.r, xpv:T.xp, boss:!!T.boss, tname:T.name,
+    hp, maxHp:hp, dmg:T.dmg, spd:T.spd, r:T.r, xpv:T.xp, boss:!!T.boss, tname:T.name, crisisTag:tag||null,
     cool:0, slow:0, dying:0, hit:0, dead:false }); if(T.boss) AUDIO.sfx.boss(); }
 function addHit(pos, dmg, crit){ hits.push({ pos: pos.clone(), text:'-'+Math.round(dmg), t:0.9, crit:!!crit }); }
 function rollDamage(base){ const crit = Math.random()<heroCrit.chance; return { dmg: crit?base*heroCrit.mult:base, crit }; }
@@ -604,6 +615,7 @@ function updateCombat(dt){
   for(const e of enemies){
     if(!e.dying && e.isRival && e.fleeAt!=null && e.hp<=e.fleeAt){ e.dying=0.5; gainXp(Math.round(e.xpv*0.5)); rivalFlee(e); continue; }   // he always escapes — until his true form
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
+      if(e.crisisTag && e.crisisTag===crisis && !crisis.resolved){ crisis.pending=Math.max(0,(crisis.pending||0)-1); if(crisis.pending<=0) resolveCrisis(); }   // only THIS wave counts
       { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
       if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
@@ -738,7 +750,9 @@ addEventListener('beforeunload', ()=>{ if(started && !w.over) saveGame(); });
 
 // ---- loop ----
 const clock = new THREE.Clock();
+let contextLost = false;
 function animate(){
+  if(contextLost) return;                                             // the recovery screen owns #ui now — don't overwrite it
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
   // real-time flow: time passes and the gods act on their own — no turns taken (paused until you choose a calling)
