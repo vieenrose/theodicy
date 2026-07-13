@@ -436,7 +436,7 @@ function maybeOfferCovenant(){                            // earned, not handed:
 function chooseCovenant(i){ if(!covenantOpen) return; covenant=DEITY_IDS[i]; covenantOpen=false;
   if(!powerRank[COV_POWER[covenant]]) powerRank[COV_POWER[covenant]]=1; banner={t:`Covenant with ${GNAME(covenant)}`, brief:RIVAL_LINES[3].brief}; bannerT=5;
   trialOn=true; w.tension=Math.max(w.tension,72); forceChampion(); }   // the final trial — Kaine's last stand
-function endGame(won,kind){ w.over=true; w.won=won; endKind=kind; }
+function endGame(won,kind){ w.over=true; w.won=won; endKind=kind; clearSave(); }   // the tale is finished — nothing left to resume
 function storyTick(){ if(!started||w.over) return; checkCrisis(); maybeOfferCovenant(); }
 // ---- awaken the real model: swap god.decide() to the in-browser 50M LLM (WebGPU→WASM, else keep heuristic) ----
 async function awakenModel(){
@@ -625,7 +625,7 @@ function updateCombat(dt){
 // ---- input ----
 const keys = new Set();
 addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
-  if(!started){ if(['1','2','3','4'].includes(k)) startGame(DEITY_IDS[+k-1]); return; }   // calling screen
+  if(!started){ if(['1','2','3','4'].includes(k)) startGame(DEITY_IDS[+k-1]); else if(k==='enter'&&saveAvailable) loadGame(); return; }   // calling screen
   if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){keys.add(k);e.preventDefault();}
   if(k==='e') interact();
   if(k===' '){ heroAttack(); e.preventDefault(); }
@@ -677,8 +677,59 @@ function restart(){
   npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
+  clearSave(); saveAvailable=null;                         // a deliberate new beginning — the old tale is done
 }
 window.__acc=accuse; window.restart=restart;
+
+// ---- SAVE / LOAD (localStorage, client-only): a tale survives closing the tab ----
+const SAVE_KEY = 'theodicy-save-v1';
+function saveGame(){
+  if(!started || w.over) return;                          // nothing worth resuming
+  try{
+    const data = { v:1, savedAt:Date.now(), w, day, dayT, divPool,
+      calling, piety, crisis, chronicle, covenant, covenantOpen, endKind, trialOn,
+      rival, rivalMet, seenAshfields, lostFolk, npcPeril, reads,
+      hero:{ x:hero.position.x, z:hero.position.z, ry:hero.rotation.y },
+      heroHp, mana, level, xp, points, deaths,
+      baseMax, baseDmg, baseManaMax, relics, powerRank, furyMult,
+      npcs: NPCS.map(n=>({ id:n.id, alive:n.alive, state:n.state, talked:n.talked, kills:n.kills,
+        ally:n.ally, hp:n.hp, maxHp:n.maxHp, level:n.level, downed:n.downed, x:n.mesh.position.x, z:n.mesh.position.z })),
+      muted: AUDIO.muted() };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  }catch(e){ console.warn('save failed:', e); }             // storage full/disabled — the run just isn't resumable
+}
+function readSave(){
+  try{ const raw=localStorage.getItem(SAVE_KEY); if(!raw) return null; const d=JSON.parse(raw); return (d && d.v===1) ? d : null; }
+  catch(e){ return null; }
+}
+function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+function loadGame(){
+  const d=readSave(); if(!d) return;
+  w=d.w; day=d.day; dayT=d.dayT; divPool=d.divPool;
+  calling=d.calling; piety=d.piety; crisis=d.crisis; chronicle=d.chronicle;
+  covenant=d.covenant; covenantOpen=d.covenantOpen; endKind=d.endKind; trialOn=d.trialOn;
+  rival=d.rival; rivalMet=d.rivalMet; seenAshfields=d.seenAshfields; lostFolk=d.lostFolk; npcPeril=d.npcPeril; reads=d.reads;
+  level=d.level; xp=d.xp; points=d.points; deaths=d.deaths;
+  baseMax=d.baseMax; baseDmg=d.baseDmg; baseManaMax=d.baseManaMax; relics=d.relics; powerRank=d.powerRank; furyMult=d.furyMult;
+  recomputeStats();                                        // derive heroMax/heroDmg/manaMax/heroCrit from base+relics
+  heroHp=Math.min(heroMax, d.heroHp); mana=Math.min(manaMax, d.mana);   // then restore the ACTUAL saved health, not full
+  hero.position.set(d.hero.x, 0, d.hero.z); hero.rotation.y=d.hero.ry;
+  for(const e of enemies) if(e.mesh.parent) scene.remove(e.mesh);
+  for(const L of loot) if(L.mesh.parent) scene.remove(L.mesh);
+  enemies=[]; loot=[]; hits=[];
+  for(const nd of d.npcs){ const n=NPCS.find(x=>x.id===nd.id); if(!n) continue;
+    n.alive=nd.alive; n.state=nd.state; n.talked=nd.talked; n.kills=nd.kills; n.ally=nd.ally; n.hp=nd.hp; n.maxHp=nd.maxHp; n.level=nd.level; n.downed=nd.downed;
+    n.mesh.position.set(nd.x,0,nd.z); n.mesh.rotation.z=nd.downed>0?1.4:0;
+    if(!n.alive && n.mesh.parent) scene.remove(n.mesh); else if(n.alive && !n.mesh.parent) scene.add(n.mesh); }
+  party.length=0; party.push(...NPCS.filter(n=>n.ally && n.alive));
+  if(!!d.muted !== AUDIO.muted()) AUDIO.toggleMute();
+  started=true; showTree=false; showChron=false; shrineMenu=false; npcMenu=null;
+  toast='The tale resumes.'; toastT=3;
+}
+window.loadGame = loadGame;
+let saveAvailable = readSave();                            // checked once at page load, for the calling screen's Resume option
+let saveTimer = 0;
+addEventListener('beforeunload', ()=>{ if(started && !w.over) saveGame(); });
 
 // ---- loop ----
 const clock = new THREE.Clock();
@@ -720,6 +771,7 @@ function animate(){
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
   if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
   if(started && !w.over) storyTick();                                 // advance the emergent campaign
+  if(started && !w.over){ saveTimer+=dt; if(saveTimer>6){ saveTimer=0; saveGame(); } }   // autosave every ~6s of play
   if(bannerT>0) bannerT-=dt;                                          // title card fades
   AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
   if(fxT>0) fxT-=dt;
@@ -778,6 +830,7 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'tree' || cmd === 'closetree') showTree = (cmd === 'tree');
   else if (cmd === 'cov') chooseCovenant(+arg);
   else if (cmd === 'call') startGame(arg);
+  else if (cmd === 'resume') loadGame();
   else if (cmd === 'mind') awakenModel();
   else if (cmd === 'chron') showChron = !showChron;
   else if (cmd === 'relicswap') resolveRelicOffer(+arg);
@@ -837,7 +890,8 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">
      <p class="serif text-5xl text-stone-100 tracking-[0.2em]">THEODICY</p>
      <p class="serif italic text-stone-400 mt-2">Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.</p>
-     <p class="mono text-[11px] uppercase tracking-[0.3em] text-amber-400 mt-6 mb-3">whom do you revere?&nbsp;&nbsp;[1–4]</p>
+     ${saveAvailable?`<div class="mt-5 mb-1"><button data-act="resume" class="pointer-events-auto text-left w-80 max-w-full mx-auto block p-3 rounded-lg border border-amber-700/60 bg-amber-950/20 hover:bg-amber-950/40"><div class="mono text-xs text-amber-300">◆ resume your tale <span class="text-stone-500">[Enter]</span></div><div class="serif italic text-[12px] text-stone-400 mt-0.5">Lv ${saveAvailable.level} · day ${saveAvailable.day} · ${GNAME(saveAvailable.calling)}'s calling${saveAvailable.covenant?` · pledged to ${GNAME(saveAvailable.covenant)}`:''}</div></button></div><p class="mono text-[9px] text-stone-600 mb-1">— or begin a new tale —</p>`:''}
+     <p class="mono text-[11px] uppercase tracking-[0.3em] text-amber-400 mt-3 mb-3">whom do you revere?&nbsp;&nbsp;[1–4]</p>
      <div class="flex flex-wrap gap-3 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="call:${d}" class="pointer-events-auto text-left w-52 p-3 rounded-lg border hover:bg-stone-900" style="border-color:${GODC[d]}66"><div class="mono text-xs mb-1" style="color:${GODC[d]}"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[CALLINGS[d].power].name}</span></div><div class="serif italic text-[12px] text-stone-400 leading-snug">${CALLINGS[d].blurb}</div></button>`).join('')}</div>
      <p class="mono text-[9px] text-stone-600 mt-6">left-click move · SPACE strike · SHIFT roll · Q/R/F/V powers · E act · K chronicle</p>
      <button data-act="mind" class="pointer-events-auto mono text-[10px] mt-4 px-3 py-1.5 rounded border ${godBackend==='supra'?'border-violet-700 text-violet-300':'border-stone-700 text-stone-500 hover:text-stone-300'}">${godLoading?`◍ waking ${godName}… ${godPct}%`:(godBackend==='supra'?`◈ the divine mind is awake (${godName})`:'◇ awaken the divine mind — a real LLM becomes the god (Qwen2.5-0.5B on WebGPU, ~480MB; else SmolLM2-360M)')}</button>
