@@ -271,14 +271,22 @@ const ALLY = {
   bran:  { hp:130, role:'blade', cd:1.0, dmg:15 },   // Kel: wades in, melee
   sela:  { hp:75,  role:'smite', cd:3.2, dmg:24 },   // Ithra: judgement at range
 };
-function recruit(n){ if(n.ally) return; const a=ALLY[n.id]; n.ally=true; n.maxHp=a.hp; n.hp=a.hp; n.downed=0; n.cd=a.cd; party.push(n);
-  toast=`${n.name} takes up arms at your side.`; toastT=3.5; }
+// allies scale with the HERO's level (same curve as enemy hp: *(1+level*0.1)) so they never fall
+// behind the fight they're helping you win — a static ally would become dead weight by lv8+.
+function allyMaxHp(id){ return Math.round(ALLY[id].hp*(1+level*0.1)); }
+function allyDmg(id){ return Math.round((ALLY[id].dmg||0)*(1+level*0.1)); }
+function rescaleParty(){                              // called on hero level-up: grow allies, keep their hp ratio
+  for(const n of party){ if(!n.alive) continue; const frac = n.maxHp>0 ? n.hp/n.maxHp : 1;
+    n.maxHp = allyMaxHp(n.id); n.hp = Math.round(n.maxHp*frac); } }
+function recruit(n){ if(n.ally) return; n.ally=true; n.maxHp=allyMaxHp(n.id); n.hp=n.maxHp; n.downed=0; n.cd=ALLY[n.id].cd; n.level=Math.max(1,level); party.push(n);
+  toast=`${n.name} takes up arms at your side (Lv ${n.level}).`; toastT=3.5; }
 function nearestEnemyTo(x,z,maxD){ let best=null,bd=maxD*maxD; for(const e of enemies){ if(e.dying||e.hp<=0)continue; const dx=e.mesh.position.x-x,dz=e.mesh.position.z-z,dd=dx*dx+dz*dz; if(dd<bd){bd=dd;best=e;} } return best; }
 function updateParty(dt){
   const foes = enemies.filter(e=>!e.dying&&e.hp>0);
   party.forEach((n,idx)=>{
     if(!n.alive) return;
-    const a=ALLY[n.id];
+    const a=ALLY[n.id], dmg=allyDmg(n.id), healScale=1+level*0.05;
+    n.level = level;                                   // an ally always fights at the hero's current level
     if(n.downed>0){ n.downed-=dt; n.mesh.position.y=0.3; n.mesh.rotation.z=1.4;   // lie fallen until revived
       if(n.downed<=0 || !foes.length){ n.downed=0; n.hp=n.maxHp*0.5; n.mesh.rotation.z=0; } return; }
     const ang = hero.rotation.y + Math.PI + (idx-1.5)*0.5;                 // a slot behind the hero
@@ -290,10 +298,10 @@ function updateParty(dt){
     n.mesh.position.y = Math.sin(clock.elapsedTime*4+idx)*0.1;
     n.cd -= dt;
     if(n.cd<=0){
-      if(a.role==='blade'){ if(tgt && d<=4.2){ tgt.hp-=a.dmg; tgt.hit=0.15; addHit(tgt.mesh.position,a.dmg); n.cd=a.cd; } else n.cd=0.2; }
-      else if(a.role==='smite'){ if(tgt){ tgt.hp-=a.dmg; tgt.hit=0.15; addHit(tgt.mesh.position,a.dmg); AUDIO.sfx.cast(466); n.cd=a.cd; } else n.cd=0.4; }
-      else if(a.role==='mend'){ heroHp=Math.min(heroMax,heroHp+16); party.forEach(p=>{ if(!p.downed) p.hp=Math.min(p.maxHp,p.hp+10); }); n.cd=a.cd; }
-      else if(a.role==='douse'){ let hit=false; for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z)<20){ e.slow=3; hit=true; } } heroHp=Math.min(heroMax,heroHp+6); n.cd = hit?a.cd:1; }
+      if(a.role==='blade'){ if(tgt && d<=4.2){ tgt.hp-=dmg; tgt.hit=0.15; addHit(tgt.mesh.position,dmg); n.cd=a.cd; } else n.cd=0.2; }
+      else if(a.role==='smite'){ if(tgt){ tgt.hp-=dmg; tgt.hit=0.15; addHit(tgt.mesh.position,dmg); AUDIO.sfx.cast(466); n.cd=a.cd; } else n.cd=0.4; }
+      else if(a.role==='mend'){ const heal=Math.round(16*healScale); heroHp=Math.min(heroMax,heroHp+heal); party.forEach(p=>{ if(!p.downed) p.hp=Math.min(p.maxHp,p.hp+Math.round(10*healScale)); }); n.cd=a.cd; }
+      else if(a.role==='douse'){ let hit=false; for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z)<20){ e.slow=3; hit=true; } } heroHp=Math.min(heroMax,heroHp+Math.round(6*healScale)); n.cd = hit?a.cd:1; }
     }
     for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z) < e.r+2.2){ n.hp -= e.dmg*0.5*dt; } }   // chip damage
     if(n.hp<=0){ n.hp=0; n.downed=relicHas('reviveHalf')?4:8; toast=`${n.name} is downed!`; toastT=2; AUDIO.sfx.hit(); }
@@ -509,7 +517,7 @@ function spawnEnemy(){ const T=ETYPES[pickType()], rp=SITES.ridge.pos, a=Math.ra
     cool:0, slow:0, dying:0, hit:0, dead:false }); if(T.boss) AUDIO.sfx.boss(); }
 function addHit(pos, dmg, crit){ hits.push({ pos: pos.clone(), text:'-'+Math.round(dmg), t:0.9, crit:!!crit }); }
 function rollDamage(base){ const crit = Math.random()<heroCrit.chance; return { dmg: crit?base*heroCrit.mult:base, crit }; }
-function gainXp(n){ xp+=n; while(xp>=xpNext()){ xp-=xpNext(); level++; baseMax+=18; baseDmg+=3; points++; fx3('#e7e5e4'); AUDIO.sfx.level(); recomputeStats(); heroHp=heroMax; } }
+function gainXp(n){ xp+=n; while(xp>=xpNext()){ xp-=xpNext(); level++; baseMax+=18; baseDmg+=3; points++; fx3('#e7e5e4'); AUDIO.sfx.level(); recomputeStats(); heroHp=heroMax; rescaleParty(); } }
 function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
   const relicId = kind==='relic' ? pickRelicId() : null;
   const tierC = relicId ? TIER_COLOR[RELICS[relicId].tier] : null;
@@ -741,7 +749,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${started&&!w.over&&crisis?`<div class="absolute top-14 left-5 max-w-[260px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em]" style="color:${GODC[crisis.god]}">⚠ ${crisis.title} · ${GNAME(crisis.god)}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${crisis.goal}</div></div>`:''}
    ${started&&!w.over&&!crisis?`<div class="absolute top-14 left-5 pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-stone-500">the vale holds its breath…</div></div>`:''}
    ${started&&!w.over?`<div class="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-none">${DEITY_IDS.map(d=>`<div><div class="mono text-[8px] mb-0.5 ${calling===d?'font-bold':''}" style="color:${GODC[d]}">${GNAME(d)}${calling===d?' ✦':''}</div><div class="w-2.5 h-16 rounded bg-stone-800 relative overflow-hidden"><div class="absolute bottom-0 w-full rounded" style="height:${piety[d]*10}%;background:${GODC[d]}"></div></div></div>`).join('')}</div>`:''}
-   ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">your party</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-11" style="color:${npcColorHex(n.color)}">${n.name}</span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
+   ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">your party</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-16" style="color:${npcColorHex(n.color)}">${n.name} <span class="text-stone-600">Lv${n.level||level}</span></span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
    ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${banner.t}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${banner.brief}</p></div>`:''}
    ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
    ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
