@@ -296,7 +296,7 @@ function updateParty(dt){
       else if(a.role==='douse'){ let hit=false; for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z)<20){ e.slow=3; hit=true; } } heroHp=Math.min(heroMax,heroHp+6); n.cd = hit?a.cd:1; }
     }
     for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z) < e.r+2.2){ n.hp -= e.dmg*0.5*dt; } }   // chip damage
-    if(n.hp<=0){ n.hp=0; n.downed=8; toast=`${n.name} is downed!`; toastT=2; AUDIO.sfx.hit(); }
+    if(n.hp<=0){ n.hp=0; n.downed=relicHas('reviveHalf')?4:8; toast=`${n.name} is downed!`; toastT=2; AUDIO.sfx.hit(); }
     else if(!foes.length && n.hp<n.maxHp) n.hp=Math.min(n.maxHp, n.hp+8*dt);   // regen out of fight
   });
 }
@@ -320,6 +320,9 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.Shad
 let heroHp = 100, heroMax = 100, heroDmg = 16, heroFlash = 0, invuln = 0;
 let level = 1, xp = 0, points = 1, deaths = 0, fury = 0;
 let mana = 60, manaMax = 60, showTree = false, castCd = {};
+let baseMax = 100, baseDmg = 16, baseManaMax = 60;            // stats from LEVEL alone — relics modify on top
+let heroCrit = { chance: 0.06, mult: 1.6 };                    // base crit; relics can raise either
+let relics = [], relicSlots = 3, relicOffer = null;            // equipped relics (build identity) + a pending pickup choice
 let enemies = [], loot = [], hits = [], spawnT = 4, toast = '', toastT = 0;
 
 // ---- THE STORYTELLER: the gods' REAL choices (from the ledger) drive emergent crises ----
@@ -428,6 +431,49 @@ const POWER_KEYS = Object.keys(POWERS);
 let unlocked = new Set(['mend']);
 const KEYMAP = { q:'mend', r:'flood', f:'smite', v:'fury' };
 function unlock(key){ const pw=POWERS[key]; if(pw && points>=pw.pts && !unlocked.has(key)){ points-=pw.pts; unlocked.add(key); } }
+
+// ---- RELICS: build identity — every one is a TRADEOFF, not a free stat, and slots are scarce (3) ----
+// so equipping is a real decision (Meier test: consequences, no dominant pick, reasoning is possible).
+const RELICS = {
+  silt_ring:   { god:'vurm',  tier:'common', name:'Silt Ring',       desc:'+12 max mana, −8 max HP',        d:{manaMax:12, hpMax:-8} },
+  flood_charm: { god:'vurm',  tier:'rare',   name:'Flood Charm',     desc:'+60% mana regen, −10% move speed', d:{manaRegenPct:0.6, movePct:-0.10} },
+  vurm_tide:   { god:'vurm',  tier:'mythic', name:"Vurm's Tide",     desc:'full mana on every kill, −20 max HP', d:{hpMax:-20, manaOnKill:true} },
+  raiders_tooth:{ god:'kel',  tier:'common', name:"Raider's Tooth",  desc:'+4 damage, −8 max HP',            d:{dmgFlat:4, hpMax:-8} },
+  war_paint:   { god:'kel',   tier:'rare',   name:'War Paint',       desc:'+25% damage, take +15% damage',   d:{dmgPct:0.25, dmgTakenPct:0.15} },
+  kel_fury:    { god:'kel',   tier:'mythic', name:"Kel's Fury Stone",desc:'+50% damage, no passive healing', d:{dmgPct:0.50, noRegen:true} },
+  kind_token:  { god:'oss',   tier:'common', name:'Kind Hand Token', desc:'+14 max HP, −1 damage',           d:{hpMax:14, dmgFlat:-1} },
+  shelter_locket:{god:'oss',  tier:'rare',   name:'Shelter Locket',  desc:'+22% max HP, −10% damage',        d:{hpPct:0.22, dmgPct:-0.10} },
+  oss_mercy:   { god:'oss',   tier:'mythic', name:"Oss's Mercy",     desc:'allies revive in half the time, +15 max HP', d:{hpMax:15, reviveHalf:true} },
+  ledger_seal: { god:'ithra', tier:'common', name:'Ledger Seal',     desc:'+8% crit chance, −6 max HP',      d:{critChance:0.08, hpMax:-6} },
+  cold_scale:  { god:'ithra', tier:'rare',   name:'Cold Scale',      desc:'+18% crit chance, −10% max HP',   d:{critChance:0.18, hpPct:-0.10} },
+  ithra_judge: { god:'ithra', tier:'mythic', name:"Ithra's Judgement",desc:'crits also slow the foe, −15% damage', d:{critSlow:true, dmgPct:-0.15} },
+};
+const TIER_COLOR = { common:'#a8a29e', rare:'#60a5fa', mythic:'#f59e0b' };
+function relicSum(field){ return relics.reduce((s,id)=> s + (RELICS[id].d[field]||0), 0); }
+function relicHas(field){ return relics.some(id=> RELICS[id].d[field]); }
+function recomputeStats(){                            // base (level) + every equipped relic's delta, applied together
+  const hpFrac = heroMax>0 ? heroHp/heroMax : 1, mnFrac = manaMax>0 ? mana/manaMax : 1;
+  heroMax = Math.max(20, Math.round((baseMax + relicSum('hpMax')) * (1 + relicSum('hpPct'))));
+  heroDmg = Math.max(1, Math.round((baseDmg + relicSum('dmgFlat')) * (1 + relicSum('dmgPct'))));
+  manaMax = Math.max(10, Math.round(baseManaMax + relicSum('manaMax')));
+  heroCrit.chance = Math.min(0.75, 0.06 + relicSum('critChance'));
+  heroHp = Math.round(heroMax * hpFrac); mana = Math.round(manaMax * mnFrac);
+}
+function pickRelicId(){                                // weighted by tier; better relics show up as you go deeper
+  const w = day>=4 ? {common:0.4,rare:0.4,mythic:0.2} : day>=2 ? {common:0.55,rare:0.35,mythic:0.10} : {common:0.75,rare:0.23,mythic:0.02};
+  const r=Math.random(); const tier = r<w.common?'common':(r<w.common+w.rare?'rare':'mythic');
+  const pool=Object.keys(RELICS).filter(k=>RELICS[k].tier===tier); return pool[Math.floor(Math.random()*pool.length)]; }
+function equipRelic(id){ relics.push(id); recomputeStats(); toast=`Relic bound — ${RELICS[id].name}.`; toastT=3; }
+function offerRelic(id){                               // slots full → a real choice: swap one out, or discard the find
+  if(relics.length<relicSlots){ equipRelic(id); return; }
+  relicOffer=id; busy=true; }
+function resolveRelicOffer(swapIdx){                    // swapIdx: -1 discard, 0..n-1 replace that slot
+  if(relicOffer==null) { busy=false; return; }
+  if(swapIdx>=0){ const out=relics[swapIdx]; relics.splice(swapIdx,1,relicOffer); toast=`${RELICS[out].name} → ${RELICS[relicOffer].name}.`; toastT=3; }
+  else { toast='Left the relic behind.'; toastT=2; }
+  relicOffer=null; busy=false; recomputeStats();
+}
+window.resolveRelicOffer = resolveRelicOffer;
 function cast(key){ const pw=POWERS[key]; if(!pw||!unlocked.has(key)||(castCd[key]||0)>0||mana<pw.cost||w.over) return; mana-=pw.cost; castCd[key]=pw.cd; pw.cast(); AUDIO.sfx.cast(GODF[pw.god]); if(key==='mend') completeNPC(npcOf('mercy')); }
 window.unlock = unlock; window.cast = cast;
 
@@ -461,14 +507,19 @@ function spawnEnemy(){ const T=ETYPES[pickType()], rp=SITES.ridge.pos, a=Math.ra
   enemies.push({ mesh:enemyMesh(rp[0]+Math.cos(a)*20, rp[2]+Math.abs(Math.sin(a))*14, T),
     hp, maxHp:hp, dmg:T.dmg, spd:T.spd, r:T.r, xpv:T.xp, boss:!!T.boss, tname:T.name,
     cool:0, slow:0, dying:0, hit:0, dead:false }); if(T.boss) AUDIO.sfx.boss(); }
-function addHit(pos, dmg){ hits.push({ pos: pos.clone(), text:'-'+Math.round(dmg), t:0.9 }); }
-function gainXp(n){ xp+=n; while(xp>=xpNext()){ xp-=xpNext(); level++; heroMax+=18; heroHp=heroMax; heroDmg+=3; points++; fx3('#e7e5e4'); AUDIO.sfx.level(); } }
+function addHit(pos, dmg, crit){ hits.push({ pos: pos.clone(), text:'-'+Math.round(dmg), t:0.9, crit:!!crit }); }
+function rollDamage(base){ const crit = Math.random()<heroCrit.chance; return { dmg: crit?base*heroCrit.mult:base, crit }; }
+function gainXp(n){ xp+=n; while(xp>=xpNext()){ xp-=xpNext(); level++; baseMax+=18; baseDmg+=3; points++; fx3('#e7e5e4'); AUDIO.sfx.level(); recomputeStats(); heroHp=heroMax; } }
 function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
-  const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:0xa78bfa, emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
-  const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind }); }
+  const relicId = kind==='relic' ? pickRelicId() : null;
+  const tierC = relicId ? TIER_COLOR[RELICS[relicId].tier] : null;
+  const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:(tierC?parseInt(tierC.slice(1),16):0xa78bfa), emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
+  const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind, relicId }); }
 function heroAttack(){ if(w.over) return; AUDIO.sfx.attack(); let best=null,bd=1e9;
   for(const e of enemies){ if(e.hp<=0||e.dying)continue; const d=hero.position.distanceTo(e.mesh.position); if(d<9&&d<bd){bd=d;best=e;} }
-  if(best){ const dmg=heroDmg*(fury>0?1.6:1); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg);
+  if(best){ const {dmg,crit}=rollDamage(heroDmg*(fury>0?1.6:1)); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg, crit);
+    if(crit && relicHas('critSlow')) best.slow=Math.max(best.slow,2.5);
+    if(relicHas('manaOnKill') && best.hp<=0) mana=manaMax;
     const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.3); } }
 function updateCombat(dt){
   // spawn pressure scales with bandit strength (and your level)
@@ -478,7 +529,7 @@ function updateCombat(dt){
   for(const k in castCd) if(castCd[k]>0) castCd[k]-=dt;
   for(let i=hits.length-1;i>=0;i--){ hits[i].t-=dt; hits[i].pos.y+=dt*7; if(hits[i].t<=0) hits.splice(i,1); }
   const clear = enemies.every(e=>e.dying || hero.position.distanceTo(e.mesh.position)>16);
-  if(heroHp<heroMax && clear) heroHp=Math.min(heroMax,heroHp+7*dt);
+  if(heroHp<heroMax && clear && !relicHas('noRegen')) heroHp=Math.min(heroMax,heroHp+7*dt);   // Kel's Fury Stone forbids the mercy of rest
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
@@ -490,16 +541,16 @@ function updateCombat(dt){
     const dh=hero.position.distanceTo(e.mesh.position), tgt = dh<30 ? hero.position : vc;
     const dir=new THREE.Vector3(tgt.x-e.mesh.position.x,0,tgt.z-e.mesh.position.z), d=dir.length();
     if(d>3+e.r){ dir.normalize(); e.mesh.position.addScaledVector(dir,(e.slow>0?e.spd*0.4:e.spd)*dt); e.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
-    else { e.cool-=dt; if(e.cool<=0){ e.cool=1; if(tgt===hero.position){ if(invuln<=0){ heroHp-=e.dmg; heroFlash=0.16; } } else { w.village.food=Math.max(0,w.village.food-1); w.tension=Math.min(100,w.tension+0.6); } } }
+    else { e.cool-=dt; if(e.cool<=0){ e.cool=1; if(tgt===hero.position){ if(invuln<=0){ heroHp-=e.dmg*(1+relicSum('dmgTakenPct')); heroFlash=0.16; } } else { w.village.food=Math.max(0,w.village.food-1); w.tension=Math.min(100,w.tension+0.6); } } }
   }
   enemies = enemies.filter(e=>!e.dead);
   updateParty(dt);   // allies move, fight, support, and can be downed
   // loot: bob, spin, auto-collect on touch — grain feeds the vale, relics buff the hero
   for(let i=loot.length-1;i>=0;i--){ const L=loot[i]; L.mesh.rotation.y+=dt*2.5; L.mesh.position.y=1.5+Math.sin(clock.elapsedTime*3+i)*0.3;
     if(hero.position.distanceTo(L.mesh.position)<3.2){
-      if(L.kind==='grain'){ w.village.food+=4; toast='+4 grain for the vale'; }
-      else { const r=Math.random(); if(r<0.34){heroDmg+=3;toast='relic — +3 damage';} else if(r<0.67){heroMax+=15;heroHp+=15;toast='relic — +15 max health';} else {manaMax+=15;mana+=15;toast='relic — +15 max mana';} }
-      toastT=2.2; scene.remove(L.mesh); loot.splice(i,1); fx3(L.kind==='grain'?'#f59e0b':'#a78bfa'); AUDIO.sfx.pickup(); } }
+      if(L.kind==='grain'){ w.village.food+=4; toast='+4 grain for the vale'; toastT=2.2; }
+      else { offerRelic(L.relicId); }   // slot free → equips outright; slots full → opens the swap choice
+      scene.remove(L.mesh); loot.splice(i,1); fx3(L.kind==='grain'?'#f59e0b':(TIER_COLOR[RELICS[L.relicId].tier])); AUDIO.sfx.pickup(); } }
   // death → respawn at the village with brief mercy
   if(heroHp<=0){ heroHp=heroMax; invuln=2.5; deaths++; hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]); w.village.morale=Math.max(0,w.village.morale-8); fx3('#7f1d1d'); AUDIO.sfx.death(); }
 }
@@ -548,6 +599,7 @@ function restart(){
   w=newWorld(); reads=[]; omen=null; pending=null; day=1; dayT=0; divPool=0;
   enemies=[]; loot=[]; hits=[]; toast=''; toastT=0; heroHp=100; heroMax=100; heroDmg=16; level=1; xp=0; points=1; deaths=0; fury=0;
   mana=60; manaMax=60; unlocked=new Set(['mend']); castCd={}; spawnT=4; invuln=0; showTree=false;
+  baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
   npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0;   // revive the named folk for a new tale
@@ -577,19 +629,19 @@ function animate(){
   // move (world-relative)
   if(dodgeCd>0) dodgeCd-=dt;
   if(dodgeT>0 && started && !w.over){ dodgeT-=dt; hero.position.x+=dodgeDir.x*62*dt; hero.position.z+=dodgeDir.z*62*dt; }
-  else if(started && !busy && !w.over){ let dx=0,dz=0;
+  else if(started && !busy && !w.over){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));
     if(keys.has('w')||keys.has('arrowup'))dz--; if(keys.has('s')||keys.has('arrowdown'))dz++;
     if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
-    if(dx||dz){ moveTarget=null; attackTarget=null; const m=Math.hypot(dx,dz); hero.position.x+=dx/m*26*dt; hero.position.z+=dz/m*26*dt; hero.rotation.y=Math.atan2(dx,dz); }   // WASD overrides click
+    if(dx||dz){ moveTarget=null; attackTarget=null; const m=Math.hypot(dx,dz); hero.position.x+=dx/m*spd*dt; hero.position.z+=dz/m*spd*dt; hero.rotation.y=Math.atan2(dx,dz); }   // WASD overrides click
     else if(attackTarget){                               // attack-move: close in, then strike on a cadence
       if(attackTarget.dying || attackTarget.hp<=0 || attackTarget.dead || !attackTarget.mesh.parent){ attackTarget=null; }
       else { const ddx=attackTarget.mesh.position.x-hero.position.x, ddz=attackTarget.mesh.position.z-hero.position.z, d=Math.hypot(ddx,ddz);
         hero.rotation.y=Math.atan2(ddx,ddz);
-        if(d>7){ hero.position.x+=ddx/d*26*dt; hero.position.z+=ddz/d*26*dt; }
+        if(d>7){ hero.position.x+=ddx/d*spd*dt; hero.position.z+=ddz/d*spd*dt; }
         atkTimer-=dt; if(d<=8 && atkTimer<=0){ heroAttack(); atkTimer=0.55; } } }
     else if(moveTarget){                                 // walk to the clicked point
       const ddx=moveTarget.x-hero.position.x, ddz=moveTarget.z-hero.position.z, d=Math.hypot(ddx,ddz);
-      if(d>1.3){ hero.position.x+=ddx/d*26*dt; hero.position.z+=ddz/d*26*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
+      if(d>1.3){ hero.position.x+=ddx/d*spd*dt; hero.position.z+=ddz/d*spd*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
   if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.pos[0],hero.position.z-npcMenu.pos[2])>13)) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
@@ -655,6 +707,7 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'call') startGame(arg);
   else if (cmd === 'mind') awakenModel();
   else if (cmd === 'chron') showChron = !showChron;
+  else if (cmd === 'relicswap') resolveRelicOffer(+arg);
   else if (cmd === 'mute') AUDIO.toggleMute();
 });
 function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=>r.correct).length;
@@ -665,7 +718,9 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
       <div class="mono text-[7px] text-stone-500 mt-0.5">${has?pw.name:'locked'}</div></button>`; }).join('');
   const tree = showTree ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="closetree"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6" data-act="stop"><div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Covenant</h2><span class="mono text-xs text-amber-300">${points} point${points!==1?'s':''}</span></div><div class="grid grid-cols-4 gap-3">${POWER_KEYS.map(k=>{const pw=POWERS[k],has=unlocked.has(k);return `<div class="border border-stone-800 rounded p-3 text-center"><div class="serif text-sm" style="color:${GODC[pw.god]}">${pw.name}${has?' ✓':''}</div><div class="mono text-[8px] text-stone-600 my-1">${pw.desc}<br/>${pw.cost} mana · [${pw.key}]</div>${has?'':`<button data-act="unlock:${k}" ${points>=pw.pts?'':'disabled'} class="mono text-[9px] px-2 py-0.5 rounded border ${points>=pw.pts?'border-stone-500 text-stone-200 hover:bg-stone-800':'border-stone-800 text-stone-600'}">unlock · ${pw.pts}pt</button>`}</div>`;}).join('')}</div><p class="serif italic text-stone-500 text-xs mt-4">Slay Kel's raiders for XP; each level grants a Covenant point. Unlock a god's power, wield it with its key.</p><button data-act="closetree" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (C)</button></div></div>` : '';
   const boss = enemies.find(e=>e.boss && !e.dying);
-  const hitEls = hits.map(h=>{ const p=h.pos.clone().project(camera); if(p.z>1) return ''; const x=((p.x*0.5+0.5)*innerWidth)|0, y=((-p.y*0.5+0.5)*innerHeight)|0; return `<div class="absolute mono text-base font-bold" style="left:${x}px;top:${y}px;transform:translate(-50%,-50%);color:#fda4af;opacity:${Math.min(1,h.t).toFixed(2)}">${h.text}</div>`; }).join('');
+  const hitEls = hits.map(h=>{ const p=h.pos.clone().project(camera); if(p.z>1) return ''; const x=((p.x*0.5+0.5)*innerWidth)|0, y=((-p.y*0.5+0.5)*innerHeight)|0;
+    return `<div class="absolute mono font-bold ${h.crit?'text-xl':'text-base'}" style="left:${x}px;top:${y}px;transform:translate(-50%,-50%);color:${h.crit?'#fbbf24':'#fda4af'};opacity:${Math.min(1,h.t).toFixed(2)}">${h.text}${h.crit?'!':''}</div>`; }).join('');
+  const relicBar = `<div class="flex gap-1.5">${relics.map(id=>{const r=RELICS[id];return `<div class="w-9 h-9 rounded border grid place-items-center" style="border-color:${TIER_COLOR[r.tier]}88" title="${r.name}: ${r.desc}"><span class="mono text-[8px]" style="color:${TIER_COLOR[r.tier]}">${r.name.slice(0,2)}</span></div>`;}).join('')}${Array.from({length:relicSlots-relics.length}).map(()=>`<div class="w-9 h-9 rounded border border-dashed border-stone-800"></div>`).join('')}</div>`;
   ui.innerHTML=`
    ${hitEls}
    <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
@@ -695,8 +750,10 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${started&&!w.over?`<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-end gap-3">
      <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ Powers${points?` (${points})`:''}</button>
      <div class="flex gap-2">${skill}</div>
+     <div class="flex flex-col items-center"><span class="mono text-[7px] text-stone-600 mb-1">relics</span>${relicBar}</div>
      <span class="mono text-[9px] text-stone-500 self-center leading-tight">SPACE strike · SHIFT roll<br/>K chronicle</span>
    </div>`:''}
+   ${relicOffer?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="max-w-xl w-full px-6 text-center"><p class="mono text-[10px] uppercase tracking-[0.35em]" style="color:${TIER_COLOR[RELICS[relicOffer].tier]}">a relic — ${RELICS[relicOffer].tier}</p><p class="serif text-3xl text-stone-100 mt-2">${RELICS[relicOffer].name}</p><p class="serif italic text-stone-400 mt-1 mb-5">${RELICS[relicOffer].desc}</p><p class="mono text-[10px] text-stone-500 mb-2">your relics are full (${relicSlots}) — bind it in place of one, or leave it</p><div class="flex flex-wrap gap-2 justify-center">${relics.map((id,i)=>{const r=RELICS[id];return `<button data-act="relicswap:${i}" class="pointer-events-auto text-left w-48 p-2.5 rounded border hover:bg-stone-900" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></button>`;}).join('')}</div><button data-act="relicswap:-1" class="pointer-events-auto mono text-xs mt-4 px-4 py-2 rounded border border-stone-700 text-stone-400 hover:bg-stone-900">leave it behind</button></div></div>`:''}
    ${tree}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
    ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div><p class="serif italic text-stone-200 text-[15px] leading-snug">“${npcLine(npcMenu)}”</p>${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
