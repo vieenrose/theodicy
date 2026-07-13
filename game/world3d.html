@@ -255,12 +255,51 @@ let npcMenu=null, lostFolk=[], npcPeril=[6,4,2];   // as Aldermere empties, its 
 function npcLine(n){ if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
 function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } npcMenu=n; }
 function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
-  toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; }
+  toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
 function npcOf(kind){ return NPCS.find(n=>n.alive && n.state==='active' && n.quest.kind===kind); }
 function killNPC(){ const doomed=NPCS.filter(n=>n.alive); if(!doomed.length) return;
   doomed.sort((a,b)=> (a.state==='done'?1:0)-(b.state==='done'?1:0));   // the unhelped fall first
   const n=doomed[0]; n.alive=false; if(n.mesh&&n.mesh.parent) scene.remove(n.mesh); if(npcMenu&&npcMenu.id===n.id) npcMenu=null;
+  const pi=party.indexOf(n); if(pi>=0) party.splice(pi,1);   // a fallen ally leaves the party
   lostFolk.push(n.name); w.village.morale=Math.max(0,w.village.morale-4); toast=`${n.name} is lost to the vale.`; toastT=4; AUDIO.sfx.death(); }
+
+// ---- THE PARTY: fulfil a folk's charge and they take up arms — each with a god-themed role ----
+const party = [];
+const ALLY = {
+  maren: { hp:80,  role:'douse', cd:5.0 },   // Vurm: slows nearby foes + a little water-mending
+  oda:   { hp:65,  role:'mend',  cd:6.0 },   // Oss: heals the hero and the party
+  bran:  { hp:130, role:'blade', cd:1.0, dmg:15 },   // Kel: wades in, melee
+  sela:  { hp:75,  role:'smite', cd:3.2, dmg:24 },   // Ithra: judgement at range
+};
+function recruit(n){ if(n.ally) return; const a=ALLY[n.id]; n.ally=true; n.maxHp=a.hp; n.hp=a.hp; n.downed=0; n.cd=a.cd; party.push(n);
+  toast=`${n.name} takes up arms at your side.`; toastT=3.5; }
+function nearestEnemyTo(x,z,maxD){ let best=null,bd=maxD*maxD; for(const e of enemies){ if(e.dying||e.hp<=0)continue; const dx=e.mesh.position.x-x,dz=e.mesh.position.z-z,dd=dx*dx+dz*dz; if(dd<bd){bd=dd;best=e;} } return best; }
+function updateParty(dt){
+  const foes = enemies.filter(e=>!e.dying&&e.hp>0);
+  party.forEach((n,idx)=>{
+    if(!n.alive) return;
+    const a=ALLY[n.id];
+    if(n.downed>0){ n.downed-=dt; n.mesh.position.y=0.3; n.mesh.rotation.z=1.4;   // lie fallen until revived
+      if(n.downed<=0 || !foes.length){ n.downed=0; n.hp=n.maxHp*0.5; n.mesh.rotation.z=0; } return; }
+    const ang = hero.rotation.y + Math.PI + (idx-1.5)*0.5;                 // a slot behind the hero
+    let tx = hero.position.x + Math.sin(ang)*7, tz = hero.position.z + Math.cos(ang)*7, engaging=false;
+    const tgt = nearestEnemyTo(n.mesh.position.x, n.mesh.position.z, 34);
+    if(tgt && a.role==='blade'){ tx=tgt.mesh.position.x; tz=tgt.mesh.position.z; engaging=true; }
+    const dx=tx-n.mesh.position.x, dz=tz-n.mesh.position.z, d=Math.hypot(dx,dz), spd=(a.role==='blade'?22:16);
+    if(d>(engaging?3.5:1.5)){ n.mesh.position.x+=dx/d*spd*dt; n.mesh.position.z+=dz/d*spd*dt; n.mesh.rotation.y=Math.atan2(dx,dz); }
+    n.mesh.position.y = Math.sin(clock.elapsedTime*4+idx)*0.1;
+    n.cd -= dt;
+    if(n.cd<=0){
+      if(a.role==='blade'){ if(tgt && d<=4.2){ tgt.hp-=a.dmg; tgt.hit=0.15; addHit(tgt.mesh.position,a.dmg); n.cd=a.cd; } else n.cd=0.2; }
+      else if(a.role==='smite'){ if(tgt){ tgt.hp-=a.dmg; tgt.hit=0.15; addHit(tgt.mesh.position,a.dmg); AUDIO.sfx.cast(466); n.cd=a.cd; } else n.cd=0.4; }
+      else if(a.role==='mend'){ heroHp=Math.min(heroMax,heroHp+16); party.forEach(p=>{ if(!p.downed) p.hp=Math.min(p.maxHp,p.hp+10); }); n.cd=a.cd; }
+      else if(a.role==='douse'){ let hit=false; for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z)<20){ e.slow=3; hit=true; } } heroHp=Math.min(heroMax,heroHp+6); n.cd = hit?a.cd:1; }
+    }
+    for(const e of foes){ if(Math.hypot(e.mesh.position.x-n.mesh.position.x,e.mesh.position.z-n.mesh.position.z) < e.r+2.2){ n.hp -= e.dmg*0.5*dt; } }   // chip damage
+    if(n.hp<=0){ n.hp=0; n.downed=8; toast=`${n.name} is downed!`; toastT=2; AUDIO.sfx.hit(); }
+    else if(!foes.length && n.hp<n.maxHp) n.hp=Math.min(n.maxHp, n.hp+8*dt);   // regen out of fight
+  });
+}
 
 // ---- western forest (instanced-ish cones) ----
 for (let i=0;i<40;i++){
@@ -454,6 +493,7 @@ function updateCombat(dt){
     else { e.cool-=dt; if(e.cool<=0){ e.cool=1; if(tgt===hero.position){ if(invuln<=0){ heroHp-=e.dmg; heroFlash=0.16; } } else { w.village.food=Math.max(0,w.village.food-1); w.tension=Math.min(100,w.tension+0.6); } } }
   }
   enemies = enemies.filter(e=>!e.dead);
+  updateParty(dt);   // allies move, fight, support, and can be downed
   // loot: bob, spin, auto-collect on touch — grain feeds the vale, relics buff the hero
   for(let i=loot.length-1;i>=0;i--){ const L=loot[i]; L.mesh.rotation.y+=dt*2.5; L.mesh.position.y=1.5+Math.sin(clock.elapsedTime*3+i)*0.3;
     if(hero.position.distanceTo(L.mesh.position)<3.2){
@@ -485,7 +525,7 @@ addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
 function nearestThing(){ let best=null,bd=1e9;   // NPC or site — whichever is closest wins the [E] key
-  for(const n of NPCS){ if(!n.alive) continue; const d=Math.hypot(hero.position.x-n.pos[0], hero.position.z-n.pos[2]); if(d<11 && d<bd){bd=d; best={type:'npc', npc:n};} }
+  for(const n of NPCS){ if(!n.alive||n.ally) continue; const d=Math.hypot(hero.position.x-n.pos[0], hero.position.z-n.pos[2]); if(d<11 && d<bd){bd=d; best={type:'npc', npc:n};} }
   for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d; best={type:'site', id, s};} }
   return best; }
 function interact(){ if(w.over||!started||covenantOpen) return;
@@ -510,8 +550,8 @@ function restart(){
   mana=60; manaMax=60; unlocked=new Set(['mend']); castCd={}; spawnT=4; invuln=0; showTree=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
-  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2];   // revive the named folk for a new tale
-  for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
+  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0;   // revive the named folk for a new tale
+  for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
 }
 window.__acc=accuse; window.restart=restart;
@@ -583,7 +623,7 @@ function animate(){
     vlg.mesh.children[0].material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
   }
   // named folk: bob gently; glow amber when their god's crisis is upon them, green when their charge is met
-  for(const n of NPCS){ if(!n.alive||!n.body) continue;
+  for(const n of NPCS){ if(!n.alive||!n.body||n.ally) continue;   // allies are driven by updateParty
     const inPeril = crisis && crisis.god===n.god && !crisis.resolved;
     n.body.material.emissive.setHex(inPeril ? 0x5a3a0a : (n.state==='done' ? 0x0a2a12 : 0x000000));
     n.mesh.position.y = Math.sin(clock.elapsedTime*1.6 + n.pos[0]) * 0.12; }
@@ -646,6 +686,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${started&&!w.over&&crisis?`<div class="absolute top-14 left-5 max-w-[260px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em]" style="color:${GODC[crisis.god]}">⚠ ${crisis.title} · ${GNAME(crisis.god)}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${crisis.goal}</div></div>`:''}
    ${started&&!w.over&&!crisis?`<div class="absolute top-14 left-5 pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-stone-500">the vale holds its breath…</div></div>`:''}
    ${started&&!w.over?`<div class="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-none">${DEITY_IDS.map(d=>`<div><div class="mono text-[8px] mb-0.5 ${calling===d?'font-bold':''}" style="color:${GODC[d]}">${GNAME(d)}${calling===d?' ✦':''}</div><div class="w-2.5 h-16 rounded bg-stone-800 relative overflow-hidden"><div class="absolute bottom-0 w-full rounded" style="height:${piety[d]*10}%;background:${GODC[d]}"></div></div></div>`).join('')}</div>`:''}
+   ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">your party</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-11" style="color:${npcColorHex(n.color)}">${n.name}</span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
    ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${banner.t}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${banner.brief}</p></div>`:''}
    ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
    ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
