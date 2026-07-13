@@ -66,11 +66,16 @@ const AUDIO = (() => {
     bells();                                            // sparse tolling either way
   }
   function fadeTick(){                                  // manual volume crossfade (Web-Audio ramps can't touch a plain <audio>)
-    for(const k in tracks){ mvol[k] += (mtarget[k]-mvol[k])*0.09; try { tracks[k].volume = muted?0:Math.max(0,Math.min(1,mvol[k])); } catch(e){} } }
+    let settled = true;
+    for(const k in tracks){ const d=mtarget[k]-mvol[k]; if(Math.abs(d)>0.002) settled=false;
+      mvol[k] += d*0.09; try { tracks[k].volume = muted?0:Math.max(0,Math.min(1,mvol[k])); } catch(e){} }
+    if(settled && musicTimer){ clearInterval(musicTimer); musicTimer=null; }   // stop ticking 20x/s once the crossfade has nowhere left to go
+  }
   function onTrackFail(){ if(++failed >= 2) droneFallback(); }   // both stems dead → keep the air alive
   function setMode(m){                                  // 'explore' | 'combat' — retarget the crossfade
     if(m===mmode) return; mmode = m;
     mtarget.explore = (m==='explore') ? MVOL : 0.0; mtarget.combat = (m==='combat') ? MVOL : 0.0;
+    if(!musicTimer && Object.keys(tracks).length) musicTimer = setInterval(fadeTick, 50);   // resume ticking for the new target
   }
   function droneFallback(){                             // a slow dark drone: root+fifth+octave through a moving lowpass
     if(droneOn || !ctx) return; droneOn = true;         // idempotent: only ever one drone, even if both callers fire

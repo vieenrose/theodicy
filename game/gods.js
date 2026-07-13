@@ -164,7 +164,7 @@ export class SupraGod {
       });
       const full = this.tok.batch_decode(out, { skip_special_tokens: true })[0];
       const tail = full.slice(prompt.length);
-      const m = tail.match(/([a-z]+)\s*:\s*([a-z]+)/i);
+      const m = tail.match(/(vurm|kel|oss|ithra)\s*:\s*([a-z]+)/i);   // anchored to real deity ids — a stray "word:word" in prose can't false-match
       let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
       let src = 'supra';
       if (!chosen) {                                   // off-menu → anger-weighted legal pick
@@ -256,12 +256,16 @@ export class InstructGod {
 
   async decide(w, legal) {
     if (!this.ready) return this.fallback.decide(w, legal);
-    try {
-      if (this.mode === 'choose') return await this.#chooseAndVoice(w, legal);
-      const bid = await this.fallback.decide(w, legal);           // 'voice': oracle picks
-      if (bid) bid.omen = await this.#omen(w, bid);               // model only speaks
-      return bid;
-    } catch (e) { console.warn('InstructGod failed, falling back:', e); return this.fallback.decide(w, legal); }
+    if (this.mode === 'choose') {
+      try { return await this.#chooseAndVoice(w, legal); }
+      catch (e) { console.warn('InstructGod failed, falling back:', e); return this.fallback.decide(w, legal); }
+    }
+    const bid = await this.fallback.decide(w, legal);             // 'voice': the oracle ALWAYS picks the act — never re-rolled
+    if (bid) {
+      try { bid.omen = await this.#omen(w, bid); }                // model only speaks; if even that fails, keep the bid's own canned omen
+      catch (e) { console.warn('InstructGod omen failed, keeping the already-chosen act:', e); }
+    }
+    return bid;
   }
 
   // 'choose': the model reads the world, picks one act from the menu, and speaks its omen
@@ -273,7 +277,7 @@ export class InstructGod {
       { role: 'assistant', content: 'kel:raid | Smoke stains the dawn; the ridge has found its appetite.' },
       { role: 'user', content: `The valley now:\n${digest(w)}\nMENU: ${menu.join(', ')}\nYour act:` },
     ], 46, this.temperature, 1.1);
-    const m = tail.match(/([a-z]+)\s*:\s*([a-z_]+)\s*[|\-–—:]*\s*(.*)/i);
+    const m = tail.match(/(vurm|kel|oss|ithra)\s*:\s*([a-z_]+)\s*[|\-–—:]*\s*(.*)/i);   // anchored to real deity ids, so a stray "word:word" earlier in the prose can't steal the match (and pollute the omen capture)
     let chosen = m ? legal.find((b) => b.deity === m[1].toLowerCase() && b.verb === m[2].toLowerCase()) : null;
     const reason = chosen ? this.name : 'prior';
     if (!chosen) {                                     // off-menu → anger-weighted lawful pick
