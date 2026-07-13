@@ -260,14 +260,42 @@ const NPCS = [
           active:'Still it runs foul. Please — draw the cover, clear the silt.',
           done:'The water runs clear again. Bless your hands. Vurm is quiet… for now.',
           crisis:'The well sours as we speak — go, before the children drink!',
-          covenant:c=>c==='vurm'?'Then the water remembers you kindly. I always knew it would be Vurm.':'Not Vurm? …well. The well will keep regardless. I hope you chose well.' } },
+          covenant:c=>c==='vurm'?'Then the water remembers you kindly. I always knew it would be Vurm.':'Not Vurm? …well. The well will keep regardless. I hope you chose well.' },
+    topics:[
+      { id:'vale', label:'Ask about Aldermere', line:"Before the souring, this was a green place — full nights, fat harvests. I don't remember when the water first turned. Only that we stopped trusting it, and started tending it instead. That's most of what a vale is, in the end: what you keep tending after you stop trusting it." },
+      { id:'vurm', label:'Ask about Vurm', line:"Vurm doesn't punish you the way Kel does — loud, then over. Vurm just... withholds. Quietly, for years, until you notice the well tastes wrong and you can't remember when it started. I've made my peace with a god like that. Mostly." },
+      { id:'self', label:'Ask why she tends it so fiercely',
+        line:"My mother drew water from this well the winter it first soured, and didn't know. She was gone within the month. I was young enough that I only remember the SHAPE of losing her, not the reasons. I tend the well because nobody tended it for her.",
+        choices:[
+          { label:'"I\'m sorry. That\'s a heavy thing to carry."', trust:2,
+            effect(n){ w.village.morale=Math.min(100,w.village.morale+2); },
+            result:'She nods, quiet a moment. "Most people say something like that and move on. Thank you for not moving on quite so fast."' },
+          { label:'"The vale needs the water more than it needs grief."', trust:1,
+            effect(n){ addPiety('vurm',0.3); },
+            result:'A short, dry laugh. "Vurm would agree with you. That\'s either a comfort or a warning — I\'ve never worked out which."' },
+        ] },
+    ] },
   { id:'oda', name:'Oda', role:'a young mother', god:'oss', color:0x34d399, pos:[13,0,15],
     quest:{ desc:'Bring the village respite  [rest Aldermere, or Mend]', kind:'mercy' },
     say:{ idle:"My boy hasn't woken clear-eyed in days. If Oss still leans kind, let the village rest a while.",
           active:'He is weaker today. We need respite — rest us, or a mending hand.',
           done:'He smiled this morning. Oss’s mercy moves through you. Thank you.',
           crisis:'Everyone is afraid. Steady us — we cannot hold if hope goes.',
-          covenant:c=>c==='oss'?'Oss, then. My boy will grow up gentler for it. Thank you.':"Not Oss… I understand. Mercy isn't the only shield a home needs." } },
+          covenant:c=>c==='oss'?'Oss, then. My boy will grow up gentler for it. Thank you.':"Not Oss… I understand. Mercy isn't the only shield a home needs." },
+    topics:[
+      { id:'son', label:'Ask about her son', line:"He asks me sometimes why the vale is sick. I don't have a good answer that isn't frightening, so I tell him the gods are arguing and we're waiting for them to finish. He seems to accept that better than I do." },
+      { id:'oss', label:'Ask why she trusts mercy over strength', line:"I've seen what strength costs, up close. Mercy is slower and it doesn't always feel like winning. But it's the only thing I've seen that doesn't ask you to bury someone to prove it worked." },
+      { id:'self', label:'Ask what happened to her husband',
+        line:"He went up to the ridge with the watch, three winters back, when the raids were bad. He didn't come back down. Bran was there. He doesn't talk about it and I don't make him.",
+        choices:[
+          { label:'"Kel will answer for that, one day."', trust:1,
+            effect(n){ addPiety('kel',0.2); w.village.morale=Math.max(0,w.village.morale-2); },
+            result:'Her jaw tightens. "Maybe. But I have a son to raise, and vengeance is a poor thing to raise him on. Careful whose ledger you\'re settling."' },
+          { label:'"I\'m sorry. That\'s an old wound, still open."', trust:2,
+            effect(n){ w.village.morale=Math.min(100,w.village.morale+3); },
+            result:'"It closes a little more every year he grows. That\'s the only mending I\'ve found that actually holds." She almost smiles.' },
+        ] },
+    ] },
   { id:'bran', name:'Bran', role:'the watchman', god:'kel', color:0xfb7185, pos:[36,0,4],
     quest:{ desc:'Break the ridge-raiders  [slay 4]', kind:'slay', n:4 },
     say:{ idle:"Kel is not prayed away, only met. Cut down four of his dogs and the ridge learns fear.",
@@ -275,14 +303,42 @@ const NPCS = [
           done:'Four cold on the slope. Kel respects a blade that answers. Well fought.',
           crisis:"They are coming NOW — meet them, quickly!",
           kaineKnown:'The Ashen Wolf, twice now. I know that blade-work — I taught it to him, once. Finish what I couldn\'t.',
-          covenant:c=>c==='kel'?"Kel, then. Good. The ridge respects nothing else — and neither did Kaine, in the end.":'Not Kel… softer choice. I hope it holds when the next blade comes down from the ridge.' } },
+          covenant:c=>c==='kel'?"Kel, then. Good. The ridge respects nothing else — and neither did Kaine, in the end.":'Not Kel… softer choice. I hope it holds when the next blade comes down from the ridge.' },
+    topics:[
+      { id:'ridge', label:'Ask what he watches for', line:"Smoke that isn't ours. Birds that go quiet wrong. Most nights it's nothing — a fox, the wind. I stay anyway. The one night it isn't nothing is the only night that matters, and you don't get to pick which one that is." },
+      { id:'kel', label:'Ask what Kel is to him', line:"Not a friend. Not quite an enemy either. Kel is the reason I'm still standing on this ridge instead of lying on it. I don't love him for that. But I don't forget it." },
+      { id:'self', label:'Ask him about Kaine',
+        line:"We stood the ridge together for six years. Good man, then. Something happened up past the treeline — I still don't fully know what, he wouldn't say, and I didn't push hard enough while there was still time to push. When he came back changed, I told myself it would pass. It didn't.",
+        choices:[
+          { label:'Press him — what really happened?', trust:2,
+            effect(n){ w.village.morale=Math.max(0,w.village.morale-2); },
+            result:'He\'s quiet a long moment. "A raid went wrong. Someone he was supposed to save, he didn\'t. That\'s all I have — he never gave me more, and I stopped asking before I lost him twice." His voice has gone flat.' },
+          { label:'Let it go — some things aren\'t yours to know.', trust:2,
+            effect(n){},
+            result:'Something in his shoulders eases. "Most people push. Thank you for not being most people."' },
+        ] },
+    ] },
   { id:'sela', name:'Sela', role:'the shrine-tender', god:'ithra', color:0xa78bfa, pos:[58,0,33],
     quest:{ desc:"Read a god's hand truly  [name one omen right]", kind:'read' },
     say:{ idle:'Ithra keeps a ledger, and so must you. When the next omen comes, name whose hand it was — truly.',
           active:'The signs still puzzle you. Watch closer; name the next one right.',
           done:'You saw the hand behind the sign. Ithra marks you as one who reckons true.',
           crisis:'A judgement comes. Read it rightly, or we answer a debt not ours.',
-          covenant:c=>c==='ithra'?'Ithra keeps the ledger balanced. A fitting hand to trust — the debts are yours to weigh now.':'Not Ithra? The ledger will still be kept — just not by the hand you chose.' } },
+          covenant:c=>c==='ithra'?'Ithra keeps the ledger balanced. A fitting hand to trust — the debts are yours to weigh now.':'Not Ithra? The ledger will still be kept — just not by the hand you chose.' },
+    topics:[
+      { id:'shrine', label:'Ask about the shrine', line:"Older than Aldermere itself, they say — the vale was named around it, not the other way. Ithra doesn't ask for worship here, just an honest accounting. Some days that feels harder to give than worship would be." },
+      { id:'ithra', label:'Ask her view on judgement', line:"People hear 'judgement' and think punishment. Ithra's colder than that and, I think, fairer for it. The ledger doesn't care if you meant well. It cares if the debt is paid. I used to find that terrifying. Now I find it almost restful." },
+      { id:'self', label:'Ask why she tends the shrine herself',
+        line:"Because I owe Ithra a debt of my own, from before I came to this vale, and this is how I've chosen to carry it — in the open, where I can't pretend it isn't there.",
+        choices:[
+          { label:'"What did you bargain for?"', trust:2,
+            effect(n){ addPiety('ithra',0.3); },
+            result:'"Someone I loved was dying. I bargained for time I hadn\'t earned. I got it — and I\'ve been paying for it, honestly, ever since. I don\'t regret the bargain. I regret that I\'d make it again." She says it plainly, like a debt already reckoned.' },
+          { label:'"That\'s yours to carry. I won\'t pry."', trust:2,
+            effect(n){ w.village.morale=Math.min(100,w.village.morale+1); },
+            result:'"Most people ask anyway." A faint, real smile. "Thank you for the exception."' },
+        ] },
+    ] },
 ];
 function makeNameplate(text, hex){
   const cv=document.createElement('canvas'); cv.width=256; cv.height=64; const x=cv.getContext('2d');
@@ -299,6 +355,7 @@ function buildNPC(n){
   g.add(makeNameplate(n.name, npcColorHex(n.color)));
   g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
   n.mesh=g; n.body=robe; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
+  n.trust=0; n.asked=[]; n._topic=null; n._aside='';   // relationship + dialogue-topic state
 }
 NPCS.forEach(buildNPC);
 let npcMenu=null, lostFolk=[], npcPeril=[6,4,2];   // as Aldermere empties, its folk are lost
@@ -306,7 +363,18 @@ function npcLine(n){                                      // the world remembers
   if(covenant && n.say.covenant) return n.say.covenant(covenant);
   if(n.id==='bran' && rival.stage>=2 && n.say.kaineKnown) return n.say.kaineKnown;
   if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
-function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } npcMenu=n; }
+function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } n._topic=null; n._aside=''; npcMenu=n; }
+function askAside(n, line){                              // the awakened model riffs ONE grounded sentence onto an authored line — never invents on its own
+  if(godBackend!=='supra' || !god.npcAside) return;
+  const topicAtCall=n._topic;
+  god.npcAside(n, line).then(a=>{ if(a && n._topic===topicAtCall) n._aside=a; });
+}
+function pickTopic(n, tid){ const t=(n.topics||[]).find(x=>x.id===tid); if(!t) return;
+  n._topic=tid; n._aside='';
+  if(!t.choices){ if(!n.asked.includes(tid)){ n.asked.push(tid); n.trust=Math.min(10,n.trust+0.5); } askAside(n, t.line); } }
+function pickChoice(n, tid, ci){ const t=(n.topics||[]).find(x=>x.id===tid); if(!t||!t.choices) return; const c=t.choices[ci]; if(!c) return;
+  n._aside='';
+  if(!n.asked.includes(tid)){ n.asked.push(tid); if(c.effect) c.effect(n); n.trust=Math.min(10,n.trust+(c.trust??1)); n._results=n._results||{}; n._results[tid]=c.result; askAside(n, c.result); } }
 function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
   toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
 function npcOf(kind){ return NPCS.find(n=>n.alive && n.state==='active' && n.quest.kind===kind); }
@@ -742,7 +810,8 @@ function restart(){
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
   npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
-  for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
+  for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh);
+    nn.trust=0; nn.asked=[]; nn._results={}; nn._topic=null; nn._aside=''; }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
   clearSave(); saveAvailable=null;                         // a deliberate new beginning — the old tale is done
 }
@@ -760,7 +829,8 @@ function saveGame(){
       heroHp, mana, level, xp, points, deaths,
       baseMax, baseDmg, baseManaMax, relics, powerRank, furyMult,
       npcs: NPCS.map(n=>({ id:n.id, alive:n.alive, state:n.state, talked:n.talked, kills:n.kills,
-        ally:n.ally, hp:n.hp, maxHp:n.maxHp, level:n.level, downed:n.downed, x:n.mesh.position.x, z:n.mesh.position.z })),
+        ally:n.ally, hp:n.hp, maxHp:n.maxHp, level:n.level, downed:n.downed, x:n.mesh.position.x, z:n.mesh.position.z,
+        trust:n.trust, asked:n.asked, results:n._results })),
       muted: AUDIO.muted() };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   }catch(e){ console.warn('save failed:', e); }             // storage full/disabled — the run just isn't resumable
@@ -786,6 +856,7 @@ function loadGame(){
   enemies=[]; loot=[]; hits=[];
   for(const nd of d.npcs){ const n=NPCS.find(x=>x.id===nd.id); if(!n) continue;
     n.alive=nd.alive; n.state=nd.state; n.talked=nd.talked; n.kills=nd.kills; n.ally=nd.ally; n.hp=nd.hp; n.maxHp=nd.maxHp; n.level=nd.level; n.downed=nd.downed;
+    n.trust=nd.trust||0; n.asked=nd.asked||[]; n._results=nd.results||{}; n._topic=null; n._aside='';
     n.mesh.position.set(nd.x,0,nd.z); n.mesh.rotation.z=nd.downed>0?1.4:0;
     if(!n.alive && n.mesh.parent) scene.remove(n.mesh); else if(n.alive && !n.mesh.parent) scene.add(n.mesh); }
   party.length=0; party.push(...NPCS.filter(n=>n.ally && n.alive));
@@ -902,6 +973,8 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'resume') loadGame();
   else if (cmd === 'mind') awakenModel();
   else if (cmd === 'chron') showChron = !showChron;
+  else if (cmd === 'topic') { const [nid,tid]=arg.split('|'); const n=NPCS.find(x=>x.id===nid); if(n) pickTopic(n,tid); }
+  else if (cmd === 'choice') { const [nid,tid,ci]=arg.split('|'); const n=NPCS.find(x=>x.id===nid); if(n) pickChoice(n,tid,+ci); }
   else if (cmd === 'status') showStatus = !showStatus;
   else if (cmd === 'relicswap') resolveRelicOffer(+arg);
   else if (cmd === 'mute') AUDIO.toggleMute();
@@ -929,6 +1002,18 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
   const mmDeg = 180-(hero.rotation.y*180/Math.PI);
   const mmHeroDot = `<div class="absolute" style="left:${mmHero.x}px;top:${mmHero.y}px;transform:translate(-50%,-50%) rotate(${mmDeg}deg)"><div style="width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-top:6px solid #fbbf24"></div></div>`;
   const region = hero.position.z<-105 ? 'the ashfields' : 'the vale';
+  let npcDialogue = '';
+  if(npcMenu){
+    const n = npcMenu, t = n._topic ? (n.topics||[]).find(x=>x.id===n._topic) : null;
+    const showingChoices = t && t.choices && !n.asked.includes(t.id);
+    const mainLine = t ? (showingChoices ? t.line : (n._results&&n._results[t.id] || t.line)) : npcLine(n);
+    const remaining = (n.topics||[]).filter(x=>!n.asked.includes(x.id));
+    npcDialogue = `<p class="serif italic text-stone-200 text-[15px] leading-snug">“${mainLine}”</p>
+      ${n._aside?`<p class="serif italic text-stone-400 text-[12px] mt-1.5 leading-snug">“${n._aside}”</p>`:''}
+      ${showingChoices?`<div class="flex flex-col gap-1.5 mt-3">${t.choices.map((c,i)=>`<button data-act="choice:${n.id}|${t.id}|${i}" class="pointer-events-auto text-left mono text-[10px] px-2.5 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">${c.label}</button>`).join('')}</div>`
+        : (remaining.length?`<div class="flex flex-wrap gap-1.5 mt-3">${remaining.map(x=>`<button data-act="topic:${n.id}|${x.id}" class="pointer-events-auto mono text-[9px] px-2 py-1 rounded border border-stone-800 text-stone-500 hover:text-stone-200 hover:border-stone-600">${x.label}</button>`).join('')}</div>`:'')}
+      ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">their trust in you: ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}`;
+  }
   const statusPanel = showStatus ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="status"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6 max-h-[85vh] overflow-auto" data-act="stop">
    <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Wayfarer</h2><span class="mono text-xs text-stone-500">day ${day} · Lv ${level}</span></div>
    <div class="grid grid-cols-2 gap-6 mb-4">
@@ -989,7 +1074,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${tree}
    ${statusPanel}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">1–4 offer${w.debts.length?' · <span class="text-violet-300">P settle a debt</span>':''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">E to leave</p></div>`:''}
-   ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div><p class="serif italic text-stone-200 text-[15px] leading-snug">“${npcLine(npcMenu)}”</p>${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
+   ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div>${npcDialogue}${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
    ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] speak with <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${near.npc.role}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${near.s.label} — <span class="text-stone-500">${near.s.name}</span>`}</span></div>`:''}
    ${!npcMenu&&!near&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click move · Space strike · SHIFT roll · E speak/act · I status · K chronicle · seek the named folk of Aldermere</div>`:''}
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">

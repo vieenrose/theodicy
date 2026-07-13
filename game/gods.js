@@ -309,6 +309,29 @@ export class InstructGod {
     if (text.length < 12 || letters < text.length * 0.6) return pick(OMENS[bid.verb], Math.random);
     return text.slice(0, 160);
   }
+
+  // NPC dialogue "aside": a short, first-person riff LAYERED ONTO an already-authored line, never
+  // asked to invent a character or backstory from nothing. Same shape as #omen() — ground it hard,
+  // keep the ask tiny (one sentence), and silently yield '' on garbled/too-short output so the
+  // authored line always stands on its own with or without this. This is the honest way to use a
+  // sub-1B model for "dialogue": it can't sustain a character over a conversation, but it CAN
+  // convincingly continue one true sentence for one more breath.
+  async npcAside(npc, line) {
+    if (!this.ready) return '';
+    try {
+      const text = await this.#gen([
+        { role: 'system', content: `You are ${npc.name}, ${npc.role} of a small failing valley. You just said something true and personal to someone you trust a little. Add ONE brief, natural follow-up thought, in your own voice — a single sentence, nothing more. Reply with only that sentence.` },
+        { role: 'user', content: 'You just said: "The ridge took my brother, and I still climb it every dawn."\nYour brief follow-up thought:' },
+        { role: 'assistant', content: "Some mornings I couldn't tell you if I'm keeping watch or waiting for him." },
+        { role: 'user', content: `You just said: "${line}"\nYour brief follow-up thought:` },
+      ], 28, this.temperature, 1.2);
+      let out = text.split('\n')[0].replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      const cut = out.lastIndexOf('.'); if (cut > 8) out = out.slice(0, cut + 1);
+      const letters = (out.match(/[a-z]/gi) || []).length;
+      if (out.length < 8 || letters < out.length * 0.55) return '';   // garbled/too-short → nothing, not a fallback line
+      return out.slice(0, 140);
+    } catch (e) { console.warn('npcAside failed:', e); return ''; }
+  }
 }
 
 // ---------------------------------------------------------------------------
