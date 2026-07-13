@@ -1047,15 +1047,15 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
   const region = hero.position.z<-105 ? 'the ashfields' : 'the vale';
   let npcDialogue = '';
   if(npcMenu){
-    const n = npcMenu, t = n._topic ? (n.topics||[]).find(x=>x.id===n._topic) : null;
-    const showingChoices = t && t.choices && !n.asked.includes(t.id);
-    const mainLine = t ? (showingChoices ? t.line : (n._results&&n._results[t.id] || t.line)) : npcLine(n);
+    const n = npcMenu, top = n._topic ? (n.topics||[]).find(x=>x.id===n._topic) : null;
+    const showingChoices = top && top.choices && !n.asked.includes(top.id);
+    const mainLine = top ? (showingChoices ? top.line : (n._results&&n._results[top.id] || top.line)) : npcLine(n);
     const remaining = (n.topics||[]).filter(x=>!n.asked.includes(x.id));
-    npcDialogue = `<p class="serif italic text-stone-200 text-[15px] leading-snug">“${mainLine}”</p>
+    npcDialogue = `<p class="serif italic text-stone-200 text-[15px] leading-snug">“${t(mainLine)}”</p>
       ${n._aside?`<p class="serif italic text-stone-400 text-[12px] mt-1.5 leading-snug">“${n._aside}”</p>`:''}
-      ${showingChoices?`<div class="flex flex-col gap-1.5 mt-3">${t.choices.map((c,i)=>`<button data-act="choice:${n.id}|${t.id}|${i}" class="pointer-events-auto text-left mono text-[10px] px-2.5 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">${c.label}</button>`).join('')}</div>`
-        : (remaining.length?`<div class="flex flex-wrap gap-1.5 mt-3">${remaining.map(x=>`<button data-act="topic:${n.id}|${x.id}" class="pointer-events-auto mono text-[9px] px-2 py-1 rounded border border-stone-800 text-stone-500 hover:text-stone-200 hover:border-stone-600">${x.label}</button>`).join('')}</div>`:'')}
-      ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">their trust in you: ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}`;
+      ${showingChoices?`<div class="flex flex-col gap-1.5 mt-3">${top.choices.map((c,i)=>`<button data-act="choice:${n.id}|${top.id}|${i}" class="pointer-events-auto text-left mono text-[10px] px-2.5 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">${t(c.label)}</button>`).join('')}</div>`
+        : (remaining.length?`<div class="flex flex-wrap gap-1.5 mt-3">${remaining.map(x=>`<button data-act="topic:${n.id}|${x.id}" class="pointer-events-auto mono text-[9px] px-2 py-1 rounded border border-stone-800 text-stone-500 hover:text-stone-200 hover:border-stone-600">${t(x.label)}</button>`).join('')}</div>`:'')}
+      ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">${t('their trust in you:')} ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}`;
   }
   const statusPanel = showStatus ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="status"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6 max-h-[85vh] overflow-auto" data-act="stop">
    <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Wayfarer</h2><span class="mono text-xs text-stone-500">day ${day} · Lv ${level}</span></div>
