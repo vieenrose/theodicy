@@ -151,6 +151,11 @@ river.rotation.x = -Math.PI/2; river.rotation.z = 0.5; river.position.set(-10, 0
 // northern ridge (cones)
 for (let i=0;i<9;i++){ const h=14+Math.random()*16; const c=new THREE.Mesh(new THREE.ConeGeometry(10+Math.random()*8, h, 5),
   new THREE.MeshStandardMaterial({ color: 0x16100b, roughness:1 })); c.position.set(-90+i*22, h/2-1, -95+Math.random()*10); scene.add(c); }
+// ---- THE ASHFIELDS: a second region past the ridge — Kel's country, where the raiders come from ----
+const ash = new THREE.Mesh(new THREE.CircleGeometry(120, 32),
+  new THREE.MeshStandardMaterial({ color: 0x241611, roughness: 1 })); ash.rotation.x=-Math.PI/2; ash.position.set(10,0.02,-165); scene.add(ash);
+for (let i=0;i<6;i++){ const bx=10+(Math.random()*100-50), bz=-115-Math.random()*90;   // bone-white scatter
+  const bone=new THREE.Mesh(new THREE.SphereGeometry(1.1+Math.random(),6,6), new THREE.MeshStandardMaterial({color:0xd8cfc0,roughness:1})); bone.position.set(bx,0.8,bz); scene.add(bone); }
 
 // ---- god-sites ----
 const SITES = {
@@ -160,6 +165,7 @@ const SITES = {
   wall:    { pos:[42, 0, -6],   deity:null,    name:'The Palisade',       act:{action:'fortify'},   label:'fortify' },
   ridge:   { pos:[36, 0, -70],  deity:'kel',   name:'The Grudge Ridge',   act:{action:'harvest'},   label:'watch the treeline' },
   shrine:  { pos:[70, 0, 40],   deity:'ithra', name:'The Ledger Shrine',  shrine:true,              label:'offer, settle, desecrate' },
+  warcamp: { pos:[10, 0, -165], deity:'kel',   name:"Kel's Warcamp",      act:{action:'fortify', warcamp:true}, label:'stand at the dead fires — pay Kel his due' },
 };
 const tex = new THREE.TextureLoader();
 const billboards = {};
@@ -171,6 +177,11 @@ for (const [id, s] of Object.entries(SITES)) {
   else if (id==='fields'){ for(let i=0;i<4;i++){const f=new THREE.Mesh(new THREE.BoxGeometry(3,0.4,7), new THREE.MeshStandardMaterial({color:0x3f6b2a})); f.position.set(-6+i*4,0.2,0); grp.add(f);} s.fieldGrp=grp; }
   else if (id==='wall'){ for(let i=0;i<8;i++){const p=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,4), new THREE.MeshStandardMaterial({color:0x5b4636})); p.position.set(-7+i*2,2,0); grp.add(p);} }
   else if (id==='ridge'){ s.fireGrp=new THREE.Group(); grp.add(s.fireGrp); }
+  else if (id==='warcamp'){                             // Kel's camp: always-lit fires, war banners, a ring of tents
+    for(let i=0;i<5;i++){ const a=i/5*6.28, fr=8; const fire=new THREE.Mesh(new THREE.ConeGeometry(0.9,2.6,6), new THREE.MeshStandardMaterial({color:0xf97316,emissive:0xf97316})); fire.position.set(Math.cos(a)*fr,1.3,Math.sin(a)*fr); grp.add(fire);
+      const tent=new THREE.Mesh(new THREE.ConeGeometry(2.4,3.4,4), new THREE.MeshStandardMaterial({color:0x2a1c18,roughness:1})); tent.position.set(Math.cos(a)*(fr+6),1.7,Math.sin(a)*(fr+6)); tent.rotation.y=a; grp.add(tent); }
+    for(let i=0;i<3;i++){ const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,6), new THREE.MeshStandardMaterial({color:0x2a1c10})); pole.position.set(-4+i*4,3,-3); grp.add(pole);
+      const banner=new THREE.Mesh(new THREE.PlaneGeometry(1.6,2.4), new THREE.MeshStandardMaterial({color:0x7a1f1f,side:THREE.DoubleSide,roughness:1})); banner.position.set(-4+i*4,4.2,-2.2); grp.add(banner); } }
   else if (id==='shrine'){ const m=new THREE.Mesh(new THREE.BoxGeometry(3,7,3), new THREE.MeshStandardMaterial({color:0x2a2536,emissive:0x1a0a2a})); m.position.y=3.5; grp.add(m); s.monolith=m; }
   // god-portrait billboard (sprite) hovering above the site
   if (s.deity){
@@ -346,6 +357,7 @@ let enemies = [], loot = [], hits = [], spawnT = 4, toast = '', toastT = 0;
 // that god. Prove devotion and the Covenant opens — pledge, survive the rival's trial, earn
 // that god's ending. No two runs escalate the same way. (RimWorld's AI-Storyteller, as theodicy.)
 let calling=null, started=false;                         // your revered god (chosen at start) = identity
+let seenAshfields=false;                                  // first-crossing banner for the second region
 let piety={vurm:0,kel:0,oss:0,ithra:0};                  // standing earned through deeds
 let crisis=null, banner=null, bannerT=0;                 // active crisis + title card
 let chronicle=[], showChron=false;                       // the vale's remembered history
@@ -629,7 +641,7 @@ function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_ID
 function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity);   // instant — no turn taken
   if(a.action==='tend_well'){ addPiety('vurm',0.5); if(crisis&&crisis.kind==='well') resolveCrisis(); completeNPC(npcOf('well')); }
   else if(a.action==='harvest'){ if(crisis&&crisis.kind==='fields') resolveCrisis(); else addPiety('vurm',0.3); }
-  else if(a.action==='fortify'){ if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
+  else if(a.action==='fortify'){ if(a.warcamp) addPiety('kel',0.5); else if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
   else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); } }
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; const ok=guess===pending.actual; reads.push({correct:ok});
   if(ok){ addPiety('ithra',1); if(crisis&&crisis.kind==='read') resolveCrisis(); completeNPC(npcOf('read')); }   // reading a god truly is Ithra's work
@@ -643,7 +655,7 @@ function restart(){
   baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
-  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0;   // revive the named folk for a new tale
+  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
 }
@@ -683,7 +695,8 @@ function animate(){
     else if(moveTarget){                                 // walk to the clicked point
       const ddx=moveTarget.x-hero.position.x, ddz=moveTarget.z-hero.position.z, d=Math.hypot(ddx,ddz);
       if(d>1.3){ hero.position.x+=ddx/d*spd*dt; hero.position.z+=ddz/d*spd*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
-  hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
+  hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,105); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-195,90);   // -195: the Ashfields, past the ridge
+  if(!seenAshfields && hero.position.z<-105){ seenAshfields=true; banner={t:'The Ashfields', brief:"You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps."}; bannerT=6; }
   if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.mesh.position.x,hero.position.z-npcMenu.mesh.position.z)>(npcMenu.ally?15:13))) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
   if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
