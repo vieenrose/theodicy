@@ -111,7 +111,23 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0c0a09);
 scene.fog = new THREE.Fog(0x0c0a09, 60, 240);
 const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// WebGLRenderer throws SYNCHRONOUSLY if the browser can't create a GL context at all (hardware
+// acceleration disabled, GPU blocklisted/sandboxed, etc.) — a totally different failure from
+// losing a context after it's been running (see the webglcontextlost handler below). Uncaught,
+// this kills the whole module before a single line of UI ever renders: a silent black page with
+// no explanation, matching exactly what "totally blank/black, no text at all" looks like.
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+} catch (e) {
+  console.error('WebGL context creation failed:', e);
+  document.getElementById('ui').innerHTML = `<div class="fixed inset-0 bg-black grid place-items-center pointer-events-auto p-6"><div class="text-center max-w-lg">
+    <p class="serif text-2xl text-stone-200 mb-2">This browser can't render the vale.</p>
+    <p class="serif italic text-stone-500 text-sm mb-4">WebGL could not be created — usually because hardware acceleration is disabled, or your GPU is blocklisted/sandboxed by the browser. Try: turning on "Use hardware acceleration" in your browser's settings (then restart it), updating your graphics driver, or opening this page in a different browser.</p>
+    <button onclick="location.reload()" class="mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">try again ▸</button>
+  </div></div>`;
+  throw e;   // nothing past this point can run without a renderer — stop here, message is already painted
+}
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 document.body.appendChild(renderer.domElement);
 renderer.domElement.tabIndex = 0;                        // focusable, so keys reach us even when embedded
