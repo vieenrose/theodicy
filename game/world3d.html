@@ -207,6 +207,61 @@ for (let i=0;i<5;i++){
   villagers.push({ mesh:m, tgt:null, seed:Math.random()*6.28 });
 }
 
+// ---- NAMED FOLK OF ALDERMERE: the social pillar — talk (E), take their charge, be remembered ----
+const NPCS = [
+  { id:'maren', name:'Maren', role:'the well-keeper', god:'vurm', color:0x60a5fa, pos:[-40,0,15],
+    quest:{ desc:'Cleanse the Thirsting Well  [tend it]', kind:'well' },
+    say:{ idle:'The well tastes of copper and old grudge. Vurm counts every cup we drew untended. Cleanse it, and I will rest easier.',
+          active:'Still it runs foul. Please — draw the cover, clear the silt.',
+          done:'The water runs clear again. Bless your hands. Vurm is quiet… for now.',
+          crisis:'The well sours as we speak — go, before the children drink!' } },
+  { id:'oda', name:'Oda', role:'a young mother', god:'oss', color:0x34d399, pos:[13,0,15],
+    quest:{ desc:'Bring the village respite  [rest Aldermere, or Mend]', kind:'mercy' },
+    say:{ idle:"My boy hasn't woken clear-eyed in days. If Oss still leans kind, let the village rest a while.",
+          active:'He is weaker today. We need respite — rest us, or a mending hand.',
+          done:'He smiled this morning. Oss’s mercy moves through you. Thank you.',
+          crisis:'Everyone is afraid. Steady us — we cannot hold if hope goes.' } },
+  { id:'bran', name:'Bran', role:'the watchman', god:'kel', color:0xfb7185, pos:[36,0,4],
+    quest:{ desc:'Break the ridge-raiders  [slay 4]', kind:'slay', n:4 },
+    say:{ idle:"Kel is not prayed away, only met. Cut down four of his dogs and the ridge learns fear.",
+          active:'Fewer than four still breathe up there. Keep at it.',
+          done:'Four cold on the slope. Kel respects a blade that answers. Well fought.',
+          crisis:"They are coming NOW — meet them, quickly!" } },
+  { id:'sela', name:'Sela', role:'the shrine-tender', god:'ithra', color:0xa78bfa, pos:[58,0,33],
+    quest:{ desc:"Read a god's hand truly  [name one omen right]", kind:'read' },
+    say:{ idle:'Ithra keeps a ledger, and so must you. When the next omen comes, name whose hand it was — truly.',
+          active:'The signs still puzzle you. Watch closer; name the next one right.',
+          done:'You saw the hand behind the sign. Ithra marks you as one who reckons true.',
+          crisis:'A judgement comes. Read it rightly, or we answer a debt not ours.' } },
+];
+function makeNameplate(text, hex){
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=64; const x=cv.getContext('2d');
+  x.fillStyle='rgba(12,10,9,0.62)'; x.fillRect(6,14,244,36);
+  x.font='30px Georgia'; x.textAlign='center'; x.textBaseline='middle'; x.fillStyle=hex||'#e7e5e4'; x.fillText(text,128,34);
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(cv), transparent:true, depthTest:false }));
+  spr.scale.set(8.5,2.1,1); spr.position.y=6.6; return spr;
+}
+function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
+function buildNPC(n){
+  const g=new THREE.Group();
+  const robe=new THREE.Mesh(new THREE.ConeGeometry(1.3,3.4,8), new THREE.MeshStandardMaterial({color:n.color, roughness:0.85})); robe.position.y=1.7; g.add(robe);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.72,12,12), new THREE.MeshStandardMaterial({color:0xcaa47a, roughness:0.9})); head.position.y=3.7; g.add(head);
+  g.add(makeNameplate(n.name, npcColorHex(n.color)));
+  g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
+  n.mesh=g; n.body=robe; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
+}
+NPCS.forEach(buildNPC);
+let npcMenu=null, lostFolk=[], npcPeril=[6,4,2];   // as Aldermere empties, its folk are lost
+function npcLine(n){ if(n.state==='done') return n.say.done; if(crisis&&crisis.god===n.god&&!crisis.resolved) return n.say.crisis; if(n.state==='active') return n.say.active; return n.say.idle; }
+function talkTo(n){ n.talked=true; if(n.state==='idle'){ n.state='active'; toast=`Charge taken — ${n.name}: ${n.quest.desc}`; toastT=3.5; } npcMenu=n; }
+function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
+  toast=`${n.name}’s charge fulfilled — the vale takes heart.`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; }
+function npcOf(kind){ return NPCS.find(n=>n.alive && n.state==='active' && n.quest.kind===kind); }
+function killNPC(){ const doomed=NPCS.filter(n=>n.alive); if(!doomed.length) return;
+  doomed.sort((a,b)=> (a.state==='done'?1:0)-(b.state==='done'?1:0));   // the unhelped fall first
+  const n=doomed[0]; n.alive=false; if(n.mesh&&n.mesh.parent) scene.remove(n.mesh); if(npcMenu&&npcMenu.id===n.id) npcMenu=null;
+  lostFolk.push(n.name); w.village.morale=Math.max(0,w.village.morale-4); toast=`${n.name} is lost to the vale.`; toastT=4; AUDIO.sfx.death(); }
+
 // ---- western forest (instanced-ish cones) ----
 for (let i=0;i<40;i++){
   const t = new THREE.Mesh(new THREE.ConeGeometry(1.6+Math.random(), 5+Math.random()*3, 6), new THREE.MeshStandardMaterial({color:0x16281a, roughness:1}));
@@ -334,7 +389,7 @@ const POWER_KEYS = Object.keys(POWERS);
 let unlocked = new Set(['mend']);
 const KEYMAP = { q:'mend', r:'flood', f:'smite', v:'fury' };
 function unlock(key){ const pw=POWERS[key]; if(pw && points>=pw.pts && !unlocked.has(key)){ points-=pw.pts; unlocked.add(key); } }
-function cast(key){ const pw=POWERS[key]; if(!pw||!unlocked.has(key)||(castCd[key]||0)>0||mana<pw.cost||w.over) return; mana-=pw.cost; castCd[key]=pw.cd; pw.cast(); AUDIO.sfx.cast(GODF[pw.god]); }
+function cast(key){ const pw=POWERS[key]; if(!pw||!unlocked.has(key)||(castCd[key]||0)>0||mana<pw.cost||w.over) return; mana-=pw.cost; castCd[key]=pw.cd; pw.cast(); AUDIO.sfx.cast(GODF[pw.god]); if(key==='mend') completeNPC(npcOf('mercy')); }
 window.unlock = unlock; window.cast = cast;
 
 function enemyMesh(x,z,T){ const m=new THREE.Group(); const S=T.scale;
@@ -388,6 +443,7 @@ function updateCombat(dt){
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
+      { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
       if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
     if(e.dying){ e.dying-=dt; e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
@@ -428,16 +484,23 @@ function dodge(){ if(dodgeCd>0||w.over||!started) return; dodgeCd=1.0; dodgeT=0.
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
-function interact(){ if(w.over||!started||covenantOpen) return; const n=nearest(); if(!n) return;
-  if(n.s.shrine){shrineMenu=true;return;} doAct(n.s.act); }
+function nearestThing(){ let best=null,bd=1e9;   // NPC or site — whichever is closest wins the [E] key
+  for(const n of NPCS){ if(!n.alive) continue; const d=Math.hypot(hero.position.x-n.pos[0], hero.position.z-n.pos[2]); if(d<11 && d<bd){bd=d; best={type:'npc', npc:n};} }
+  for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d; best={type:'site', id, s};} }
+  return best; }
+function interact(){ if(w.over||!started||covenantOpen) return;
+  if(npcMenu){ npcMenu=null; return; }               // E closes an open conversation
+  const t=nearestThing(); if(!t) return;
+  if(t.type==='npc'){ talkTo(t.npc); return; }
+  if(t.s.shrine){ shrineMenu=true; return; } doAct(t.s.act); }
 function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_IDS[i]}); }
 function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity);   // instant — no turn taken
-  if(a.action==='tend_well'){ addPiety('vurm',0.5); if(crisis&&crisis.kind==='well') resolveCrisis(); }
+  if(a.action==='tend_well'){ addPiety('vurm',0.5); if(crisis&&crisis.kind==='well') resolveCrisis(); completeNPC(npcOf('well')); }
   else if(a.action==='harvest'){ if(crisis&&crisis.kind==='fields') resolveCrisis(); else addPiety('vurm',0.3); }
   else if(a.action==='fortify'){ if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
-  else if(a.action==='rest'){ addPiety('oss',0.4); } }
+  else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); } }
 function accuse(i){ if(!pending||pending.result) return; const guess=DEITY_IDS[i]; const ok=guess===pending.actual; reads.push({correct:ok});
-  if(ok){ addPiety('ithra',1); if(crisis&&crisis.kind==='read') resolveCrisis(); }   // reading a god truly is Ithra's work
+  if(ok){ addPiety('ithra',1); if(crisis&&crisis.kind==='read') resolveCrisis(); completeNPC(npcOf('read')); }   // reading a god truly is Ithra's work
   pending={...pending,result:{guess,correct:ok}}; setTimeout(()=>{if(pending&&pending.result)pending=null;},2200); }
 function restart(){
   for(const e of enemies) if(e.mesh.parent) scene.remove(e.mesh);
@@ -447,6 +510,8 @@ function restart(){
   mana=60; manaMax=60; unlocked=new Set(['mend']); castCd={}; spawnT=4; invuln=0; showTree=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
+  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2];   // revive the named folk for a new tale
+  for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh); }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
 }
 window.__acc=accuse; window.restart=restart;
@@ -459,7 +524,9 @@ function animate(){
   // real-time flow: time passes and the gods act on their own — no turns taken (paused until you choose a calling)
   if(started && !w.over && !covenantOpen){                             // covenant modal freezes the world, like the calling screen
     dayT += dt;
-    if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day; if(w.village.pop <= 0){ endGame(false, 'fall'); } }
+    if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day;
+      while(npcPeril.length && w.village.pop<=npcPeril[0]){ npcPeril.shift(); killNPC(); }   // the vale empties, and takes its folk
+      if(w.village.pop <= 0){ endGame(false, 'fall'); } }
     divPool += dt * (0.5 + w.tension * 0.02);
     if(divPool >= 8 && !divBusy){ divPool = 0; divBusy = true;
       divineStrike(w, god)
@@ -484,6 +551,7 @@ function animate(){
       const ddx=moveTarget.x-hero.position.x, ddz=moveTarget.z-hero.position.z, d=Math.hypot(ddx,ddz);
       if(d>1.3){ hero.position.x+=ddx/d*26*dt; hero.position.z+=ddz/d*26*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,95); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-90,90);
+  if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.pos[0],hero.position.z-npcMenu.pos[2])>13)) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
   if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
   if(started && !w.over) storyTick();                                 // advance the emergent campaign
@@ -514,6 +582,11 @@ function animate(){
     if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, spd*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
     vlg.mesh.children[0].material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
   }
+  // named folk: bob gently; glow amber when their god's crisis is upon them, green when their charge is met
+  for(const n of NPCS){ if(!n.alive||!n.body) continue;
+    const inPeril = crisis && crisis.god===n.god && !crisis.resolved;
+    n.body.material.emissive.setHex(inPeril ? 0x5a3a0a : (n.state==='done' ? 0x0a2a12 : 0x000000));
+    n.mesh.position.y = Math.sin(clock.elapsedTime*1.6 + n.pos[0]) * 0.12; }
   // tension → ember light + sky tint
   const t=w.tension/100; ember.intensity=t*2.4; scene.fog.color.setRGB(0.06+t*0.22,0.04,0.04); sky.material.uniforms.bot.value.setRGB(0.22+t*0.4,0.1,0.09);
   // billboards glow by wrath; ridge fires; well colour
@@ -544,7 +617,7 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'chron') showChron = !showChron;
   else if (cmd === 'mute') AUDIO.toggleMute();
 });
-function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.correct).length;
+function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=>r.correct).length;
   const hpPct=Math.max(0,heroHp)/heroMax*100, mnPct=mana/manaMax*100, xpPct=xp/xpNext()*100, foes=enemies.filter(e=>!e.dying).length;
   const skill = POWER_KEYS.map(k=>{ const pw=POWERS[k], has=unlocked.has(k), cd=castCd[k]||0, ready=has&&cd<=0&&mana>=pw.cost;
     return `<button data-act="${has?('cast:'+k):''}" ${has&&ready?'':'disabled'} class="pointer-events-auto text-center ${has?'':'opacity-30'}" title="${pw.name}: ${pw.desc}">
@@ -585,8 +658,9 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
    </div>`:''}
    ${tree}
    ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">press 1–4</p></div>`:''}
-   ${!shrineMenu&&n&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">[E] ${n.s.label} — <span class="text-stone-500">${n.s.name}</span></span></div>`:''}
-   ${!n&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click to move · click a foe to attack · WASD also walks · Space strikes · approach a place & press E</div>`:''}
+   ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${npcMenu.role}</div></div></div><p class="serif italic text-stone-200 text-[15px] leading-snug">“${npcLine(npcMenu)}”</p>${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${npcMenu.quest.desc}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ their charge is fulfilled</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] leave</div></div></div>`:''}
+   ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] speak with <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${near.npc.role}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${near.s.label} — <span class="text-stone-500">${near.s.name}</span>`}</span></div>`:''}
+   ${!npcMenu&&!near&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click move · Space strike · SHIFT roll · E speak/act · K chronicle · seek the named folk of Aldermere</div>`:''}
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">
      <p class="serif text-5xl text-stone-100 tracking-[0.2em]">THEODICY</p>
      <p class="serif italic text-stone-400 mt-2">Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.</p>
@@ -602,7 +676,8 @@ function drawUI(){ const v=w.village,n=nearest(),correct=reads.filter(r=>r.corre
      <p class="mono text-[10px] uppercase tracking-[0.35em] ${w.won?'text-amber-400':'text-rose-400'}">${w.won?'The Tale Is Told':'The Vale Falls'}</p>
      <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?PANTHEON[endKind].name.split(',')[0]+"'s Vale":'The vale is empty.'}</p>
      <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?(END_TEXT[endKind]||'The vale endures under your watch.'):'Aldermere starved before you could name a god to save it.'}</p>
-     <p class="mono text-[11px] text-stone-500 mt-4">level ${level} · fell ${deaths}× · ${day} days · read ${correct}/${reads.length} hands</p>
+     <p class="serif italic text-[13px] mt-3 leading-snug">${NPCS.filter(x=>x.alive).length?`<span class="text-stone-400">Still drawing breath:</span> <span class="text-emerald-300">${NPCS.filter(x=>x.alive).map(x=>x.name).join(', ')}</span>`:'<span class="text-rose-300">None of the named folk survived.</span>'}${lostFolk.length?` <span class="text-stone-500">·</span> <span class="text-rose-400">lost: ${lostFolk.join(', ')}</span>`:''}</p>
+     <p class="mono text-[11px] text-stone-500 mt-3">level ${level} · fell ${deaths}× · ${day} days · read ${correct}/${reads.length} hands · ${NPCS.filter(x=>x.state==='done').length}/${NPCS.length} charges kept</p>
      <button data-act="restart" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">begin anew ▸ (X)</button></div></div>`:''}`;
 }
 animate();   // renders behind the calling screen; the world wakes when you choose a god
