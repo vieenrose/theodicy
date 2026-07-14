@@ -241,9 +241,21 @@ export class InstructGod {
          : '';
   }
   #looksGarbled(text) {
-    const wordy = (text.match(/[a-zà-öø-ÿ一-鿿]/gi) || []).length;
-    const min = this.lang === 'zh' ? 4 : 12;            // CJK is denser — 4 hanzi is already a sentence fragment
-    return text.length < min || wordy < text.length * (this.lang === 'zh' ? 0.4 : 0.6);
+    // Measured (LFM2.5/Qwen2.5 CPU eval, July 2026): a one-line language directive gets ~1/3 zh
+    // compliance from a 0.5B model — the rest comes back in English. So in zh/fr this check is a
+    // LANGUAGE gate, not just a garble gate: non-compliant output falls back to the canned omen,
+    // which the UI translates. Better a translated proverb than English prophecy in a zh HUD.
+    if (this.lang === 'zh') {
+      const cjk = (text.match(/[一-鿿]/g) || []).length;
+      return cjk < 4 || cjk < text.length * 0.3;
+    }
+    if (this.lang === 'fr') {
+      const wordy = (text.match(/[a-zà-öø-ÿ]/gi) || []).length;
+      const frMark = /[à-öø-ÿ]|\b(le|la|les|un|une|des|et|qui|dans|sur|pour)\b/i.test(text);
+      return text.length < 12 || wordy < text.length * 0.6 || !frMark;
+    }
+    const letters = (text.match(/[a-z]/gi) || []).length;
+    return text.length < 12 || letters < text.length * 0.6;
   }
 
   async load(onProgress) {
