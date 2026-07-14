@@ -229,27 +229,70 @@ for (const [id, s] of Object.entries(SITES)) {
 // a cloaked wayfarer, layered primitives that read as a person — not a capsule
 const hero = new THREE.Group();
 const _hm = (c,rg,mt)=>new THREE.MeshStandardMaterial({color:c,roughness:rg??0.8,metalness:mt||0});
+// ---- procedural cloth + face textures, cached per color so repeat spawns (raiders, villagers)
+// reuse one canvas/texture instead of paying a draw+upload every time. No image assets, no
+// build step — still fully code-generated, just richer than a flat MeshStandardMaterial color.
+const _clothTexCache = new Map(), _faceTexCache = new Map();
+function clothTexture(colorHex){
+  if(_clothTexCache.has(colorHex)) return _clothTexCache.get(colorHex);
+  const cv=document.createElement('canvas'); cv.width=64; cv.height=64; const x=cv.getContext('2d');
+  const hex='#'+colorHex.toString(16).padStart(6,'0'); x.fillStyle=hex; x.fillRect(0,0,64,64);
+  x.strokeStyle='rgba(0,0,0,0.10)'; x.lineWidth=1;
+  for(let i=0;i<64;i+=4){ x.beginPath(); x.moveTo(i,0); x.lineTo(i,64); x.stroke(); }
+  x.strokeStyle='rgba(255,255,255,0.06)';
+  for(let i=2;i<64;i+=5){ x.beginPath(); x.moveTo(0,i); x.lineTo(64,i); x.stroke(); }
+  const tex=new THREE.CanvasTexture(cv); tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(2.2,2.2);
+  _clothTexCache.set(colorHex,tex); return tex;
+}
+function faceTexture(skinHex){
+  if(_faceTexCache.has(skinHex)) return _faceTexCache.get(skinHex);
+  const cv=document.createElement('canvas'); cv.width=128; cv.height=128; const x=cv.getContext('2d');
+  x.fillStyle='rgba(0,0,0,0)'; x.clearRect(0,0,128,128);
+  const hex='#'+skinHex.toString(16).padStart(6,'0'); x.fillStyle=hex; x.fillRect(8,8,112,112);
+  const grad=x.createRadialGradient(64,80,8,64,80,58); grad.addColorStop(0,'rgba(0,0,0,0)'); grad.addColorStop(1,'rgba(0,0,0,0.14)');
+  x.fillStyle=grad; x.fillRect(8,8,112,112);
+  x.fillStyle='#241a14';
+  x.beginPath(); x.ellipse(46,60,9,5.5,0,0,Math.PI*2); x.fill();
+  x.beginPath(); x.ellipse(82,60,9,5.5,0,0,Math.PI*2); x.fill();
+  x.strokeStyle='rgba(30,20,14,0.4)'; x.lineWidth=3; x.lineCap='round';
+  x.beginPath(); x.moveTo(35,47); x.lineTo(57,45); x.stroke();
+  x.beginPath(); x.moveTo(71,45); x.lineTo(93,47); x.stroke();
+  x.strokeStyle='rgba(30,20,14,0.32)'; x.lineWidth=2.5;
+  x.beginPath(); x.moveTo(52,92); x.quadraticCurveTo(64,97,76,92); x.stroke();
+  const tex=new THREE.CanvasTexture(cv); tex.transparent=true;
+  _faceTexCache.set(skinHex,tex); return tex;
+}
 // ---- a shared humanoid limb-builder: tapered limbs + joint spheres + a shoulders-wide/waist-narrow
 // torso read as a BODY, not a stack of rigid boxes — used by the hero, NPCs, villagers, and humanoid
 // enemies alike, so fixing "everyone looks like an android" fixes it everywhere at once.
-function humanoidBody(g, S, skinColor, clothColor){
-  const mat=(c,rg,mt)=>new THREE.MeshStandardMaterial({color:c, roughness:rg??0.88, metalness:mt||0});
+function humanoidBody(g, S, skinColor, clothColor, opts={}){
+  const clothTex = clothTexture(clothColor);
+  const mat=(c,rg,mt)=>{
+    if(c===clothColor) return new THREE.MeshStandardMaterial({map:clothTex, roughness:rg??0.96, metalness:mt||0});
+    return new THREE.MeshStandardMaterial({color:c, roughness:rg??0.88, metalness:mt||0});
+  };
   for(const sx of [-1,1]){
-    const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.30*S,0.23*S,1.05*S,8), mat(clothColor)); thigh.position.set(sx*0.32*S,1.55*S,0); g.add(thigh);
+    const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.30*S,0.23*S,1.05*S,12), mat(clothColor)); thigh.position.set(sx*0.32*S,1.55*S,0); g.add(thigh);
     const knee =new THREE.Mesh(new THREE.SphereGeometry(0.19*S,8,8), mat(clothColor)); knee.position.set(sx*0.32*S,1.05*S,0); g.add(knee);
-    const shin =new THREE.Mesh(new THREE.CylinderGeometry(0.21*S,0.14*S,0.9*S,8), mat(clothColor,0.9)); shin.position.set(sx*0.32*S,0.62*S,0); g.add(shin);
+    const shin =new THREE.Mesh(new THREE.CylinderGeometry(0.21*S,0.14*S,0.9*S,12), mat(clothColor,0.96)); shin.position.set(sx*0.32*S,0.62*S,0); g.add(shin);
     const foot =new THREE.Mesh(new THREE.BoxGeometry(0.26*S,0.2*S,0.5*S), mat(0x1c130c,0.95)); foot.position.set(sx*0.32*S,0.11*S,0.11*S); g.add(foot);
   }
-  const hip  =new THREE.Mesh(new THREE.CylinderGeometry(0.56*S,0.48*S,0.55*S,10), mat(clothColor)); hip.position.y=2.15*S; g.add(hip);
-  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.72*S,0.54*S,1.5*S,10), mat(clothColor)); torso.position.y=3.0*S; g.add(torso);   // WIDE at shoulders, narrow at waist — a real torso silhouette
+  const hip  =new THREE.Mesh(new THREE.CylinderGeometry(0.56*S,0.48*S,0.55*S,14), mat(clothColor)); hip.position.y=2.15*S; g.add(hip);
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.72*S,0.54*S,1.5*S,14), mat(clothColor)); torso.position.y=3.0*S; g.add(torso);   // WIDE at shoulders, narrow at waist — a real torso silhouette
   const neck =new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.24*S,0.32*S,8), mat(skinColor,0.9)); neck.position.y=3.9*S; g.add(neck);
   const head =new THREE.Mesh(new THREE.SphereGeometry(0.54*S,12,12), mat(skinColor,0.9)); head.scale.set(0.92,1.08,0.9); head.position.y=4.42*S; g.add(head);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.62*S,0.62*S), new THREE.MeshStandardMaterial({map:faceTexture(skinColor), roughness:0.9, transparent:true}));
+  face.position.set(0,4.34*S,0.47*S); g.add(face);   // a front-facing decal — hidden behind a hood's own geometry when one is worn
+  if(opts.hair){
+    const hair=new THREE.Mesh(new THREE.SphereGeometry(0.565*S,10,10,0,Math.PI*2,0,Math.PI*0.56), new THREE.MeshStandardMaterial({color:opts.hair, roughness:0.85}));
+    hair.position.y=4.5*S; g.add(hair);
+  }
   for(const sx of [-1,1]){
     const shoulder=new THREE.Mesh(new THREE.SphereGeometry(0.24*S,8,8), mat(clothColor)); shoulder.position.set(sx*0.86*S,3.55*S,0); g.add(shoulder);
     const upArm=new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.16*S,0.82*S,8), mat(clothColor)); upArm.position.set(sx*0.86*S,3.15*S,0); g.add(upArm);
     const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.165*S,8,8), mat(clothColor)); elbow.position.set(sx*0.86*S,2.76*S,0); g.add(elbow);
     const loArm=new THREE.Mesh(new THREE.CylinderGeometry(0.155*S,0.115*S,0.78*S,8), mat(skinColor,0.9)); loArm.position.set(sx*0.86*S,2.36*S,0); g.add(loArm);
-    const hand =new THREE.Mesh(new THREE.SphereGeometry(0.135*S,8,8), mat(skinColor,0.9)); hand.position.set(sx*0.86*S,1.95*S,0); g.add(hand);
+    const hand =new THREE.Mesh(new THREE.SphereGeometry(0.15*S,8,8), mat(skinColor,0.9)); hand.scale.set(0.85,1.05,0.8); hand.position.set(sx*0.86*S,1.95*S,0); g.add(hand);
   }
   return { hip, torso, neck, head };
 }
@@ -257,16 +300,17 @@ const hbParts = humanoidBody(hero, 1, 0xcaa47a, 0x4a5360);
 const body = hbParts.torso;                            // torso — flashes on hurt
 const head = hbParts.head;
 const hood = new THREE.Mesh(new THREE.ConeGeometry(0.68,1.15,12), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:0.95})); hood.position.y=4.72; hero.add(hood);
-const cloak = new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:1,side:THREE.DoubleSide})); cloak.position.set(0,3.1,-0.62); hero.add(cloak);
+const cloak = new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:1,side:THREE.DoubleSide})); cloak.position.set(0,3.1,-0.85); hero.add(cloak);   // -0.85: clear of the torso's own radius (0.72) so the flat cape doesn't pierce the solid cylinder and z-fight
 const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85})); blade.position.set(1.45,2.9,0.25); hero.add(blade);
 const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.16,0.18), new THREE.MeshStandardMaterial({color:0x2a1c10,roughness:0.9})); hilt.position.set(1.45,1.85,0.25); hero.add(hilt);
 hero.position.set(8,0,8); scene.add(hero);
 
 // ---- villagers: small autonomous agents wandering Aldermere ----
 const villagers = [];
+const VILLAGER_HAIR = [0x2e2015,0x1c1712,0x4a3222,0x6b5744,0x3a2a1c];
 for (let i=0;i<5;i++){
   const m = new THREE.Group();
-  const { torso } = humanoidBody(m, 0.82, 0xc9b28f, 0x6b5a45);
+  const { torso } = humanoidBody(m, 0.82, 0xc9b28f, 0x6b5a45, {hair:VILLAGER_HAIR[i%VILLAGER_HAIR.length]});
   m.position.set(8 + (Math.random()*12-6), 0, 8 + (Math.random()*12-6)); scene.add(m);
   villagers.push({ mesh:m, body:torso, tgt:null, seed:Math.random()*6.28 });
 }
@@ -367,9 +411,10 @@ function makeNameplate(text, hex){
   spr.scale.set(8.5,2.1,1); spr.position.y=6.6; return spr;
 }
 function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
+const NPC_HAIR = { maren:0x4a3222, oda:0x2e2015, bran:0x1c1712, sela:0x6b5744 };
 function buildNPC(n){
   const g=new THREE.Group();
-  const { torso } = humanoidBody(g, 0.92, 0xcaa47a, n.color);
+  const { torso } = humanoidBody(g, 0.92, 0xcaa47a, n.color, {hair:NPC_HAIR[n.id]});
   g.add(makeNameplate(n.name, npcColorHex(n.color)));
   g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
   n.mesh=g; n.body=torso; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
@@ -1007,7 +1052,7 @@ function enemyMesh(x,z,T){ const m=new THREE.Group(); const S=T.scale;
     const tl=new THREE.Mesh(new THREE.ConeGeometry(0.22*S,1.3*S,6), mat()); tl.rotation.z=Math.PI/2.6; tl.position.set(-1.4*S,1.35*S,0); m.add(tl);
   } else {                                              // a humanoid foe — raider / brute / champion
     const HS = S*1.35;                                  // *1.35: enemyMesh's old scale baked in bigger proportions than the hero's
-    humanoidBody(m, HS, 0x6b4636, T.color);
+    humanoidBody(m, HS, 0x6b4636, T.color, T.boss?{}:{hair:0x241a12});   // no hair on the Champion — horns sit where a hairline would
     if(T.boss){                                         // Champion of Kel: horns + greatsword, sized off the NEW head/shoulder height
       for(const sx of [-1,1]){ const horn=new THREE.Mesh(new THREE.ConeGeometry(0.18*S,0.9*S,6), mat(0xe5e0d5)); horn.position.set(sx*0.42*HS,6.25*HS,0); horn.rotation.z=sx*0.5; m.add(horn); }
       const gs=new THREE.Mesh(new THREE.BoxGeometry(0.28*S,3.8*S,0.6*S), mat(0xb7bdc4)); gs.position.set(1.15*HS,3.9*HS,0.2*S); m.add(gs);
