@@ -269,7 +269,11 @@ function makeCharacter(skinKey, tint){
 const heroChar = makeCharacter('human_male', null);
 hero.add(heroChar.group);
 const body = heroChar.body;                            // the model's material — flashes on hurt
-const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85})); blade.position.set(1.05,2.6,0.25); hero.add(blade);
+const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85}));
+blade.geometry.translate(0,0.95,0);   // grip at the origin so the blade pivots/swings from the hilt, not its middle
+blade.position.set(1.05,2.6,0.25); hero.add(blade);
+let heroHandBone=null; heroChar.group.traverse(o=>{ if(o.isBone && o.name==='RightHand') heroHandBone=o; });
+let swingT=0;                                          // >0 while the strike arc plays
 hero.position.set(8,0,8); scene.add(hero);
 
 // ---- villagers: small autonomous agents wandering Aldermere ----
@@ -1050,7 +1054,7 @@ function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
   const tierC = relicId ? TIER_COLOR[RELICS[relicId].tier] : null;
   const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:(tierC?parseInt(tierC.slice(1),16):0xa78bfa), emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
   const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind, relicId }); }
-function heroAttack(){ if(w.over) return; AUDIO.sfx.attack(); let best=null,bd=1e9;
+function heroAttack(){ if(w.over) return; AUDIO.sfx.attack(); swingT=0.22; let best=null,bd=1e9;
   for(const e of enemies){ if(e.hp<=0||e.dying)continue; const d=hero.position.distanceTo(e.mesh.position); if(d<9&&d<bd){bd=d;best=e;} }
   if(best){ const {dmg,crit}=rollDamage(heroDmg*(fury>0?furyMult:1)); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg, crit);
     if(crit && relicHas('critSlow')) best.slow=Math.max(best.slow,2.5);
@@ -1251,6 +1255,11 @@ function animate(){
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,105); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-195,90);   // -195: the Ashfields, past the ridge
   heroChar.setMoving(Math.hypot(hero.position.x-_heroPrevX,hero.position.z-_heroPrevZ) > 0.001);
   for(const mx of _mixers) mx.update(dt);
+  if(heroHandBone){                                     // blade follows the (animated) hand — held, not floating
+    const hp=new THREE.Vector3(); heroHandBone.getWorldPosition(hp); hero.worldToLocal(hp); blade.position.copy(hp);
+    if(swingT>0){ swingT-=dt; const k=1-Math.max(0,swingT)/0.22; blade.rotation.x = -1.5 + 2.1*k; }   // raised → slashed through
+    else blade.rotation.x = 0;
+  }
   if(!seenAshfields && hero.position.z<-105){ seenAshfields=true; banner={t:'The Ashfields', brief:"You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps."}; bannerT=6; }
   if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.mesh.position.x,hero.position.z-npcMenu.mesh.position.z)>(npcMenu.ally?15:13))) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
