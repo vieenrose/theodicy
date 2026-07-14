@@ -228,7 +228,22 @@ export class InstructGod {
     this.dtype = opts.dtype || 'q4f16';
     this.device = opts.device || 'webgpu';
     this.temperature = opts.temperature ?? 0.9;
+    this.lang = opts.lang || 'en';                      // UI language — the god speaks it (Qwen tier only; see decide())
     this.fallback = new HeuristicGod(7);
+  }
+  setLang(l) { this.lang = l; }
+
+  // language plumbing: the instruction the prompt appends, and a garble-check that works
+  // for non-Latin scripts too (the old /[a-z]/ letter-ratio test scores Chinese as 100% garbage)
+  #langDirective() {
+    return this.lang === 'zh' ? ' Write the omen in Traditional Chinese (繁體中文).'
+         : this.lang === 'fr' ? ' Write the omen in French.'
+         : '';
+  }
+  #looksGarbled(text) {
+    const wordy = (text.match(/[a-zà-öø-ÿ一-鿿]/gi) || []).length;
+    const min = this.lang === 'zh' ? 4 : 12;            // CJK is denser — 4 hanzi is already a sentence fragment
+    return text.length < min || wordy < text.length * (this.lang === 'zh' ? 0.4 : 0.6);
   }
 
   async load(onProgress) {
@@ -261,7 +276,7 @@ export class InstructGod {
       catch (e) { console.warn('InstructGod failed, falling back:', e); return this.fallback.decide(w, legal); }
     }
     const bid = await this.fallback.decide(w, legal);             // 'voice': the oracle ALWAYS picks the act — never re-rolled
-    if (bid) {
+    if (bid && this.lang === 'en') {                              // SmolLM2 is English-only; in fr/zh keep the canned omen, which the UI translates
       try { bid.omen = await this.#omen(w, bid); }                // model only speaks; if even that fails, keep the bid's own canned omen
       catch (e) { console.warn('InstructGod omen failed, keeping the already-chosen act:', e); }
     }
@@ -272,7 +287,7 @@ export class InstructGod {
   async #chooseAndVoice(w, legal) {
     const menu = [...new Set(legal.map((b) => `${b.deity}:${b.verb}`))];
     const tail = await this.#gen([
-      { role: 'system', content: 'You are the capricious pantheon of four gods — Vurm (water, drought), Kel (war), Oss (mercy), Ithra (judgement) — acting upon a small failing valley. From the MENU pick exactly one act, then utter a single short cryptic omen. Answer EXACTLY as: deity:verb | omen' },
+      { role: 'system', content: 'You are the capricious pantheon of four gods — Vurm (water, drought), Kel (war), Oss (mercy), Ithra (judgement) — acting upon a small failing valley. From the MENU pick exactly one act, then utter a single short cryptic omen. Answer EXACTLY as: deity:verb | omen' + this.#langDirective() },
       { role: 'user', content: 'The valley now: the well is fouled, tension high.\nMENU: kel:raid, oss:mend\nYour act:' },
       { role: 'assistant', content: 'kel:raid | Smoke stains the dawn; the ridge has found its appetite.' },
       { role: 'user', content: `The valley now:\n${digest(w)}\nMENU: ${menu.join(', ')}\nYour act:` },
@@ -288,8 +303,7 @@ export class InstructGod {
     }
     let omen = (m && m[3]) ? m[3] : tail.replace(/^[a-z]+\s*:\s*[a-z_]+\s*[|\-–—:]*/i, '');
     omen = (omen || '').split('\n')[0].replace(/["]/g, '').trim();
-    const letters = (omen.match(/[a-z]/gi) || []).length;
-    if (omen.length < 10 || letters < omen.length * 0.6) omen = pick(OMENS[chosen.verb], Math.random);
+    if (this.#looksGarbled(omen)) omen = pick(OMENS[chosen.verb], Math.random);
     return { deity: chosen.deity, verb: chosen.verb, target: null, reason, omen: omen.slice(0, 160) };
   }
 
@@ -298,15 +312,14 @@ export class InstructGod {
     const g = PANTHEON[bid.deity];
     const ctx = `water ${w.village.water}, morale ${w.village.morale}, tension ${w.tension}`;
     let text = await this.#gen([
-      { role: 'system', content: 'You are a doom-prophet of a dying valley. When a god acts, you speak ONE short, cryptic, ominous sentence of prophecy — vivid and strange. Reply with only that sentence.' },
+      { role: 'system', content: 'You are a doom-prophet of a dying valley. When a god acts, you speak ONE short, cryptic, ominous sentence of prophecy — vivid and strange. Reply with only that sentence.' + this.#langDirective() },
       { role: 'user', content: 'The god of war sends raiders down from the ridge.' },
       { role: 'assistant', content: 'Smoke stains the dawn, and the ridge has found its appetite.' },
       { role: 'user', content: `${g.name}, ${g.epithet || 'the unseen'}, works "${bid.verb}" upon the valley (${ctx}).` },
     ], 32, this.temperature, 1.3);
     text = text.split('\n')[0].replace(/^["'\s]+|["'\s]+$/g, '').trim();
     const cut = text.lastIndexOf('.'); if (cut > 12) text = text.slice(0, cut + 1);
-    const letters = (text.match(/[a-z]/gi) || []).length;
-    if (text.length < 12 || letters < text.length * 0.6) return pick(OMENS[bid.verb], Math.random);
+    if (this.#looksGarbled(text)) return pick(OMENS[bid.verb], Math.random);
     return text.slice(0, 160);
   }
 
@@ -319,16 +332,16 @@ export class InstructGod {
   async npcAside(npc, line) {
     if (!this.ready) return '';
     try {
+      if (this.mode !== 'choose' && this.lang !== 'en') return '';   // SmolLM2 can't hold fr/zh — better silence than English in a zh panel
       const text = await this.#gen([
-        { role: 'system', content: `You are ${npc.name}, ${npc.role} of a small failing valley. You just said something true and personal to someone you trust a little. Add ONE brief, natural follow-up thought, in your own voice — a single sentence, nothing more. Reply with only that sentence.` },
+        { role: 'system', content: `You are ${npc.name}, ${npc.role} of a small failing valley. You just said something true and personal to someone you trust a little. Add ONE brief, natural follow-up thought, in your own voice — a single sentence, nothing more. Reply with only that sentence.` + this.#langDirective().replace('the omen', 'it') },
         { role: 'user', content: 'You just said: "The ridge took my brother, and I still climb it every dawn."\nYour brief follow-up thought:' },
         { role: 'assistant', content: "Some mornings I couldn't tell you if I'm keeping watch or waiting for him." },
         { role: 'user', content: `You just said: "${line}"\nYour brief follow-up thought:` },
       ], 28, this.temperature, 1.2);
       let out = text.split('\n')[0].replace(/^["'\s]+|["'\s]+$/g, '').trim();
       const cut = out.lastIndexOf('.'); if (cut > 8) out = out.slice(0, cut + 1);
-      const letters = (out.match(/[a-z]/gi) || []).length;
-      if (out.length < 8 || letters < out.length * 0.55) return '';   // garbled/too-short → nothing, not a fallback line
+      if (this.#looksGarbled(out)) return '';   // garbled/too-short → nothing, not a fallback line
       return out.slice(0, 140);
     } catch (e) { console.warn('npcAside failed:', e); return ''; }
   }

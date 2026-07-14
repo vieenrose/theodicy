@@ -502,14 +502,14 @@ let crisis=null, banner=null, bannerT=0;                 // active crisis + titl
 let chronicle=[], showChron=false;                       // the vale's remembered history
 let showStatus=false;                                     // the character sheet
 let covenant=null, covenantOpen=false, endKind=null, trialOn=false;
-const GNAME=id=>PANTHEON[id].name.split(',')[0];
+const GNAME=id=>t(PANTHEON[id].name.split(',')[0]);   // god names transliterate in zh (弗爾姆 etc.); fr keeps them via fallback
 // ---- i18n: a lightweight text-as-key dictionary (no build step, no restructuring every string into
 // a key reference) — t(s) looks up the CURRENT language's translation of the exact English source
 // string s, falling back to s itself if missing or if LANG is 'en'. First pass covers the calling
 // screen, core HUD chrome, and the ending screen; crisis/dialogue text follows as a later pass —
 // there is simply a lot of it (today's NPC dialogue system alone added a large amount of new prose).
 let LANG = (localStorage.getItem('theodicy-lang')||'en');
-function setLang(l){ LANG=l; try{ localStorage.setItem('theodicy-lang', l); }catch(e){} }
+function setLang(l){ LANG=l; try{ localStorage.setItem('theodicy-lang', l); }catch(e){} if(god && god.setLang) god.setLang(l); }   // an awakened god switches tongue too
 function t(s){ return (LANG!=='en' && T[LANG] && T[LANG][s]) || s; }
 const T = {
   fr: {
@@ -660,6 +660,119 @@ const T = {
     "the vale holds its breath…":"le val retient son souffle…",
     "the vale":"le val",
     "the ashfields":"les champs de cendre",
+    "The stream runs thin and tastes of rust.":"Le ruisseau coule maigre et a un goût de rouille.",
+    "Dew does not come. The stones stay dry.":"La rosée ne vient pas. Les pierres restent sèches.",
+    "Buckets come up half, then less.":"Les seaux remontent à moitié pleins, puis moins.",
+    "A pale film sits on the water at dawn.":"Une pellicule pâle couvre l'eau à l'aube.",
+    "The dog drinks, then will not rise.":"Le chien boit, puis ne se relève plus.",
+    "Something has died upstream, and knows it.":"Quelque chose est mort en amont, et le sait.",
+    "Rain in a season that has none.":"De la pluie en une saison qui n'en a pas.",
+    "The lower field is a brown mirror.":"Le champ d'en bas est un miroir brun.",
+    "Water where water has never been.":"De l'eau là où l'eau n'a jamais été.",
+    "Smoke on the ridge, and no one lit it.":"De la fumée sur la crête, que personne n'a allumée.",
+    "The dogs face the treeline and do not bark.":"Les chiens fixent la lisière et n'aboient pas.",
+    "Hoofprints in the barley, turning back.":"Des traces de sabots dans l'orge, qui rebroussent chemin.",
+    "Someone has been selling iron on the road.":"Quelqu'un vend du fer sur la route.",
+    "Fires on the ridge, more than last week.":"Des feux sur la crête, plus que la semaine passée.",
+    "A stranger counted your gate and left.":"Un étranger a compté vos portes et est reparti.",
+    "A gate was found open. No one opened it.":"Une porte a été trouvée ouverte. Personne ne l'a ouverte.",
+    "The watchman will not meet your eye.":"Le guetteur fuit votre regard.",
+    "Rope cut from the inside.":"Une corde coupée de l'intérieur.",
+    "A child who was sick is not.":"Un enfant qui était malade ne l'est plus.",
+    "The roof holds through the night.":"Le toit tient toute la nuit.",
+    "Someone is singing in the mill again.":"Quelqu'un chante de nouveau au moulin.",
+    "The wind turns at the palisade and goes around.":"Le vent tourne à la palissade et la contourne.",
+    "The wall settles as if pressed.":"Le mur se tasse comme sous une main.",
+    "You sleep, and nothing comes.":"Vous dormez, et rien ne vient.",
+    "A week passes and nothing happens. It is unbearable.":"Une semaine passe et rien n'arrive. C'est insupportable.",
+    "The sky is only sky.":"Le ciel n'est que le ciel.",
+    "For nine days, no sign at all.":"Neuf jours durant, aucun signe.",
+    "A stranger leaves grain at the gate and asks nothing. Yet.":"Un étranger laisse du grain à la porte et ne demande rien. Pour l'instant.",
+    "The stores are fuller than you filled them.":"Les réserves sont plus pleines que vous ne les avez remplies.",
+    "A gift, unsigned, and heavy.":"Un don, non signé, et lourd.",
+    "The grain you did not count is gone.":"Le grain que vous n'avez pas compté a disparu.",
+    "A price is taken. You were not asked.":"Un prix est prélevé. On ne vous a pas demandé.",
+    "The ledger closes a line.":"Le grand livre clôt une ligne.",
+    "A dream, very clear, of who is angry.":"Un rêve, très net, de qui est en colère.",
+    "The shape of an intent, briefly, and then not.":"La forme d'une intention, un instant, puis plus rien.",
+    "You wake knowing something you did not learn.":"Vous vous réveillez en sachant une chose que vous n'avez pas apprise.",
+    "You knelt to Vurm. The well runs clear and the fields drink deep — Aldermere blooms in a mercy that asks nothing back.":"Vous vous êtes agenouillé devant Vurm. Le puits coule clair et les champs boivent à leur soif — Aldremère fleurit dans une clémence qui ne demande rien en retour.",
+    "You earned Kel's respect the only way he grants it — in blood. The ridge is yours; no raider dares test the vale.":"Vous avez gagné le respect de Kel de la seule manière qu'il accorde — dans le sang. La crête est vôtre ; aucun pillard n'ose éprouver le val.",
+    "You took Oss's hand. What the gods broke, you mend — the vale learns to forgive even heaven.":"Vous avez pris la main d'Oss. Ce que les dieux ont brisé, vous le réparez — le val apprend à pardonner jusqu'au ciel.",
+    "You chose Ithra. Judgement falls clean and cold; the vale is ordered, lawful, and a little afraid.":"Vous avez choisi Ithra. Le jugement tombe, net et froid ; le val est ordonné, respectueux des lois, et un peu effrayé.",
+    "seek the named folk of Aldermere":"cherchez les gens nommés d'Aldremère",
+    "Powers":"Pouvoirs",
+    "relics":"reliques",
+    "SPACE strike · SHIFT roll":"ESPACE frapper · MAJ roulade",
+    "I status · K chronicle":"I fiche · K chronique",
+    "foes in the vale":"ennemis dans le val",
+    "foe in the vale":"ennemi dans le val",
+    "You fell. You rise again at Aldermere.":"Vous êtes tombé. Vous vous relevez à Aldremère.",
+    "whose hand? 1–4":"la main de qui ? 1–4",
+    "✓ you knew the hand":"✓ vous avez reconnu la main",
+    "✗ it was ":"✗ c'était ",
+    "Chronicle of the Vale":"Chronique du Val",
+    "day":"jour",
+    "days":"jours",
+    "answered":"répondu",
+    "unanswered":"sans réponse",
+    "The gods have not yet moved.":"Les dieux n'ont pas encore agi.",
+    "close":"fermer",
+    "The Wayfarer":"Le Voyageur",
+    "vitals":"constantes",
+    "Damage":"Dégâts",
+    "Crit":"Crit.",
+    "Move":"Vitesse",
+    "fell":"tombé",
+    "points":"points",
+    "devotion":"dévotion",
+    "calling:":"vocation :",
+    "covenant:":"alliance :",
+    "unpledged":"sans serment",
+    "Kaine: crossed blades":"Kaine : lames croisées",
+    "fallen":"tombé",
+    "none bound":"aucune liée",
+    "powers":"pouvoirs",
+    "locked":"verrouillé",
+    "party":"compagnie",
+    "your party":"votre compagnie",
+    "downed":"à terre",
+    "Mend":"Guérison",
+    "Flood":"Déluge",
+    "Smite":"Châtiment",
+    "Fury":"Furie",
+    "At the shrine…":"Au sanctuaire…",
+    "1–4 offer":"1–4 offrir",
+    "P settle a debt":"P régler une dette",
+    "0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.":"0 — le profaner : vivres et défense immédiats, mais la faveur de chaque dieu −25 et la tension +15. Permanent.",
+    "E to leave":"E pour partir",
+    "a relic —":"une relique —",
+    "your relics are full":"vos reliques sont au complet",
+    "bind it in place of one, or leave it":"liez-la à la place d'une autre, ou laissez-la",
+    "resume your tale":"reprendre votre récit",
+    "'s calling":" — vocation",
+    "pledged to":"lié à",
+    "— or begin a new tale —":"— ou commencer un nouveau récit —",
+    "The Covenant":"L'Alliance",
+    "You have proven devotion. Pledge.":"Vous avez prouvé votre dévotion. Prêtez serment.",
+    "Your patron grants their power — and their rival rises to test your oath.":"Votre patron vous accorde son pouvoir — et son rival se lève pour éprouver votre serment.",
+    "'s Vale":" — le Val",
+    "The vale is empty.":"Le val est vide.",
+    "The vale endures under your watch.":"Le val perdure sous votre garde.",
+    "Aldermere starved before you could name a god to save it.":"Aldremère est morte de faim avant que vous ne puissiez nommer un dieu pour la sauver.",
+    "You had crossed blades with Kaine twice before he stopped running. The third time, he did not.":"Vous aviez croisé le fer avec Kaine deux fois avant qu'il ne cesse de fuir. La troisième, il n'a pas fui.",
+    "You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.":"Vous aviez rencontré le Loup de Cendre une fois, et l'aviez laissé partir. Il ne vous a pas rendu la courtoisie — mais cette fois, vous non plus.",
+    "A stranger called himself Kaine, and made his last stand where the ridge meets the vale.":"Un étranger se disait Kaine, et livra son dernier combat là où la crête rejoint le val.",
+    "read":"lu",
+    "charges kept":"charges tenues",
+    "tension":"tension",
+    "debt":"dette",
+    "waking":"éveil de",
+    "awaken mind":"éveiller l'esprit",
+    "The Vale of Aldermere":"Le Val d'Aldremère",
+    "The Ashfields":"Les Champs de Cendre",
+    "A Sign Made Real":"Un Signe Devenu Réel",
+    "You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps.":"Vous franchissez la crête vers le pays de Kel — cendre, os, et la fumée froide des vieux camps.",
   },
   zh: {
     'THEODICY':'神義論',
@@ -809,6 +922,123 @@ const T = {
     "the vale holds its breath…":"幽谷屏息以待……",
     "the vale":"幽谷",
     "the ashfields":"灰燼之地",
+    "The stream runs thin and tastes of rust.":"溪水變得細瘦，嚐起來有鏽味。",
+    "Dew does not come. The stones stay dry.":"露水不再降下。石頭始終乾涸。",
+    "Buckets come up half, then less.":"打上來的水桶只有半滿，然後更少。",
+    "A pale film sits on the water at dawn.":"黎明時分，水面浮著一層蒼白的薄膜。",
+    "The dog drinks, then will not rise.":"狗喝了水，便再也站不起來。",
+    "Something has died upstream, and knows it.":"上游有什麼死了，而且它自己知道。",
+    "Rain in a season that has none.":"無雨的季節裡下起了雨。",
+    "The lower field is a brown mirror.":"下方的田地成了一面棕色的鏡子。",
+    "Water where water has never been.":"水出現在從未有水的地方。",
+    "Smoke on the ridge, and no one lit it.":"山脊上有煙，卻無人點火。",
+    "The dogs face the treeline and do not bark.":"狗群面向林線，卻不吠叫。",
+    "Hoofprints in the barley, turning back.":"麥田裡的蹄印，掉頭而去。",
+    "Someone has been selling iron on the road.":"有人在路上兜售鐵器。",
+    "Fires on the ridge, more than last week.":"山脊上的火，比上週更多了。",
+    "A stranger counted your gate and left.":"一個陌生人數過你的門，然後離開了。",
+    "A gate was found open. No one opened it.":"有扇門被發現敞開著。沒有人開過它。",
+    "The watchman will not meet your eye.":"守望者不敢與你對視。",
+    "Rope cut from the inside.":"繩索是從裡面割斷的。",
+    "A child who was sick is not.":"生病的孩子痊癒了。",
+    "The roof holds through the night.":"屋頂撐過了整夜。",
+    "Someone is singing in the mill again.":"磨坊裡又有人唱起歌來。",
+    "The wind turns at the palisade and goes around.":"風在柵欄前轉向，繞行而過。",
+    "The wall settles as if pressed.":"牆彷彿被一隻手按實了。",
+    "You sleep, and nothing comes.":"你睡去，什麼也沒有來。",
+    "A week passes and nothing happens. It is unbearable.":"一週過去，什麼都沒發生。這令人難以忍受。",
+    "The sky is only sky.":"天空只是天空。",
+    "For nine days, no sign at all.":"九天過去，毫無徵兆。",
+    "A stranger leaves grain at the gate and asks nothing. Yet.":"一個陌生人在門前留下穀糧，什麼也不要。暫時如此。",
+    "The stores are fuller than you filled them.":"糧倉比你裝滿時還要充盈。",
+    "A gift, unsigned, and heavy.":"一份禮物，無人署名，而且沉重。",
+    "The grain you did not count is gone.":"你未曾清點的穀糧不見了。",
+    "A price is taken. You were not asked.":"代價已被取走。無人問過你。",
+    "The ledger closes a line.":"帳冊闔上了一行。",
+    "A dream, very clear, of who is angry.":"一個夢，無比清晰，夢見誰在憤怒。",
+    "The shape of an intent, briefly, and then not.":"一個意圖的輪廓，一瞬即逝。",
+    "You wake knowing something you did not learn.":"你醒來時知曉了一件你從未學過的事。",
+    "You knelt to Vurm. The well runs clear and the fields drink deep — Aldermere blooms in a mercy that asks nothing back.":"你向弗爾姆屈膝。井水清澈，田野暢飲——亞德莫爾在一份不求回報的仁慈中繁盛。",
+    "You earned Kel's respect the only way he grants it — in blood. The ridge is yours; no raider dares test the vale.":"你以凱爾唯一認可的方式贏得了他的敬重——以血。山脊屬於你；再無掠奪者膽敢試探幽谷。",
+    "You took Oss's hand. What the gods broke, you mend — the vale learns to forgive even heaven.":"你握住了歐斯之手。諸神所毀壞的，由你修補——幽谷學會了寬恕，甚至寬恕上天。",
+    "You chose Ithra. Judgement falls clean and cold; the vale is ordered, lawful, and a little afraid.":"你選擇了伊斯拉。審判乾淨而冷冽地降下；幽谷秩序井然、恪守律法，也帶著一絲畏懼。",
+    "Vurm":"弗爾姆",
+    "Kel":"凱爾",
+    "Oss":"歐斯",
+    "Ithra":"伊斯拉",
+    "seek the named folk of Aldermere":"尋訪亞德莫爾的有名之人",
+    "Powers":"神力",
+    "relics":"聖物",
+    "SPACE strike · SHIFT roll":"空白鍵攻擊．SHIFT翻滾",
+    "I status · K chronicle":"I 狀態．K 編年史",
+    "foes in the vale":"名敵人在幽谷中",
+    "foe in the vale":"名敵人在幽谷中",
+    "You fell. You rise again at Aldermere.":"你倒下了。你在亞德莫爾再度站起。",
+    "whose hand? 1–4":"這是誰的手筆？1–4",
+    "✓ you knew the hand":"✓ 你識破了那隻手",
+    "✗ it was ":"✗ 那是",
+    "Chronicle of the Vale":"幽谷編年史",
+    "day":"天數",
+    "days":"天",
+    "answered":"已回應",
+    "unanswered":"未回應",
+    "The gods have not yet moved.":"諸神尚未行動。",
+    "close":"關閉",
+    "The Wayfarer":"旅人",
+    "vitals":"生命徵象",
+    "Damage":"傷害",
+    "Crit":"暴擊",
+    "Move":"移速",
+    "fell":"倒下",
+    "points":"點數",
+    "devotion":"虔誠",
+    "calling:":"志業：",
+    "covenant:":"盟約：",
+    "unpledged":"未立誓",
+    "Kaine: crossed blades":"凱恩：交鋒",
+    "fallen":"已隕落",
+    "none bound":"尚未綁定",
+    "powers":"神力",
+    "locked":"未解鎖",
+    "party":"隊伍",
+    "your party":"你的隊伍",
+    "downed":"倒地",
+    "Mend":"療癒",
+    "Flood":"洪流",
+    "Smite":"天罰",
+    "Fury":"狂怒",
+    "At the shrine…":"於神龕前……",
+    "1–4 offer":"1–4 獻祭",
+    "P settle a debt":"P 清償債務",
+    "0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.":"0——褻瀆它：立得糧食與防禦，但每位神明的眷顧 −25、緊張 +15。永久生效。",
+    "E to leave":"E 離開",
+    "a relic —":"聖物——",
+    "your relics are full":"你的聖物欄已滿",
+    "bind it in place of one, or leave it":"以其替換一件，或將它留下",
+    "resume your tale":"繼續你的故事",
+    "'s calling":"的志業",
+    "pledged to":"已立誓於",
+    "— or begin a new tale —":"——或開始新的故事——",
+    "The Covenant":"盟約",
+    "You have proven devotion. Pledge.":"你已證明虔誠。立誓吧。",
+    "Your patron grants their power — and their rival rises to test your oath.":"你的主神將授予其神力——而其宿敵將現身，考驗你的誓言。",
+    "'s Vale":"之谷",
+    "The vale is empty.":"幽谷空無一人。",
+    "The vale endures under your watch.":"幽谷在你的守望下延續。",
+    "Aldermere starved before you could name a god to save it.":"在你來得及呼求神明拯救之前，亞德莫爾已然餓殍遍野。",
+    "You had crossed blades with Kaine twice before he stopped running. The third time, he did not.":"在凱恩不再逃跑之前，你已與他交鋒兩次。第三次，他沒有逃。",
+    "You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.":"你曾與灰燼之狼相遇一次，並放他離去。他沒有以禮相報——但這一次，你也沒有。",
+    "A stranger called himself Kaine, and made his last stand where the ridge meets the vale.":"一個自稱凱恩的陌生人，在山脊與幽谷相接之處，做了最後一搏。",
+    "read":"解讀",
+    "charges kept":"項囑託達成",
+    "tension":"緊張",
+    "debt":"債務",
+    "waking":"喚醒中",
+    "awaken mind":"喚醒神智",
+    "The Vale of Aldermere":"亞德莫爾幽谷",
+    "The Ashfields":"灰燼之地",
+    "A Sign Made Real":"徵兆成真",
+    "You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps.":"你越過山脊，踏入凱爾的疆土——灰燼、白骨，與舊營地的冷煙。",
   },
 };
 // ---- minimap: a small DOM overlay, world (x,z) -> panel pixels. No second camera/render pass. ----
@@ -924,7 +1154,7 @@ async function awakenModel(){
   for(const cfg of plan){
     try{
       godPct=0; godName=cfg.name;
-      const s = new InstructGod(cfg.id, { name:cfg.name, mode:cfg.mode, device:cfg.device, dtype:'q4f16' });
+      const s = new InstructGod(cfg.id, { name:cfg.name, mode:cfg.mode, device:cfg.device, dtype:'q4f16', lang:LANG });
       await s.load(p=>{ if(p && p.status==='progress') godPct=Math.round(p.progress||0); });
       god=s; godBackend='supra'; godLoading=false;
       toast = cfg.mode==='choose' ? `${cfg.name} awakes — the god now chooses and speaks for itself.`
@@ -1371,26 +1601,26 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
       ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">${t('their trust in you:')} ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}`;
   }
   const statusPanel = showStatus ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="status"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6 max-h-[85vh] overflow-auto" data-act="stop">
-   <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">The Wayfarer</h2><span class="mono text-xs text-stone-500">day ${day} · Lv ${level}</span></div>
+   <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">${t('The Wayfarer')}</h2><span class="mono text-xs text-stone-500">${t('day')} ${day} · Lv ${level}</span></div>
    <div class="grid grid-cols-2 gap-6 mb-4">
-     <div><div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">vitals</div>
+     <div><div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">${t('vitals')}</div>
        <div class="mono text-xs text-stone-300">HP ${Math.max(0,Math.round(heroHp))}/${heroMax} · MP ${Math.round(mana)}/${manaMax}</div>
        <div class="mono text-xs text-stone-300 mt-1">XP ${xp}/${xpNext()}</div>
-       <div class="mono text-xs text-stone-300 mt-1">Damage ${heroDmg} · Crit ${(heroCrit.chance*100).toFixed(0)}% ×${heroCrit.mult}</div>
-       <div class="mono text-xs text-stone-300 mt-1">Move ${(100+relicSum('movePct')*100).toFixed(0)}%</div>
-       <div class="mono text-xs text-stone-500 mt-1">fell ${deaths}× · points ${points}</div></div>
-     <div><div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">devotion</div>
-       <div class="mono text-xs mb-1" style="color:${calling?GODC[calling]:'#78716c'}">calling: ${calling?GNAME(calling):'—'}</div>
-       <div class="mono text-xs mb-2" style="color:${covenant?GODC[covenant]:'#78716c'}">covenant: ${covenant?GNAME(covenant):'unpledged'}</div>
+       <div class="mono text-xs text-stone-300 mt-1">${t('Damage')} ${heroDmg} · ${t('Crit')} ${(heroCrit.chance*100).toFixed(0)}% ×${heroCrit.mult}</div>
+       <div class="mono text-xs text-stone-300 mt-1">${t('Move')} ${(100+relicSum('movePct')*100).toFixed(0)}%</div>
+       <div class="mono text-xs text-stone-500 mt-1">${t('fell')} ${deaths}× · ${t('points')} ${points}</div></div>
+     <div><div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">${t('devotion')}</div>
+       <div class="mono text-xs mb-1" style="color:${calling?GODC[calling]:'#78716c'}">${t('calling:')} ${calling?GNAME(calling):'—'}</div>
+       <div class="mono text-xs mb-2" style="color:${covenant?GODC[covenant]:'#78716c'}">${t('covenant:')} ${covenant?GNAME(covenant):t('unpledged')}</div>
        ${DEITY_IDS.map(d=>`<div class="flex items-center gap-2 mb-0.5"><span class="mono text-[9px] w-10" style="color:${GODC[d]}">${GNAME(d)}</span><span class="inline-block w-20 h-1.5 rounded bg-stone-800"><span class="block h-full rounded" style="width:${piety[d]*10}%;background:${GODC[d]}"></span></span><span class="mono text-[8px] text-stone-600">${piety[d].toFixed(1)}</span></div>`).join('')}
-       ${rival.stage>0?`<div class="mono text-[9px] text-rose-400 mt-2">Kaine: crossed blades ${rivalMet}×${rival.stage>=3?' · fallen':''}</div>`:''}</div>
+       ${rival.stage>0?`<div class="mono text-[9px] text-rose-400 mt-2">${t('Kaine: crossed blades')} ${rivalMet}×${rival.stage>=3?' · '+t('fallen'):''}</div>`:''}</div>
    </div>
-   <div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">relics (${relics.length}/${relicSlots})</div>
-   <div class="grid grid-cols-3 gap-2 mb-4">${relics.length?relics.map(id=>{const r=RELICS[id];return `<div class="border rounded p-2" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></div>`;}).join(''):'<p class="mono text-[9px] text-stone-600 col-span-3">none bound</p>'}</div>
-   <div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">powers</div>
-   <div class="grid grid-cols-4 gap-2 mb-4">${POWER_KEYS.map(k=>{const pw=POWERS[k],rk=powerRank[k]||0;return `<div class="border border-stone-800 rounded p-2 text-center"><div class="serif text-xs" style="color:${GODC[pw.god]}">${pw.name}</div><div class="mono text-[8px] text-stone-500">${rk>0?'•'.repeat(rk):'locked'}</div></div>`;}).join('')}</div>
-   ${party.length?`<div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">party</div><div class="grid grid-cols-2 gap-2 mb-2">${party.map(n=>`<div class="border border-stone-800 rounded p-2"><div class="mono text-[10px]" style="color:${npcColorHex(n.color)}">${n.name} Lv${n.level||level}</div><div class="mono text-[8px] text-stone-500">${ALLY[n.id].role} · ${n.downed?'downed':Math.round(n.hp)+'/'+n.maxHp+' hp'}</div></div>`).join('')}</div>`:''}
-   <button data-act="status" class="mt-2 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (I)</button>
+   <div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">${t('relics')} (${relics.length}/${relicSlots})</div>
+   <div class="grid grid-cols-3 gap-2 mb-4">${relics.length?relics.map(id=>{const r=RELICS[id];return `<div class="border rounded p-2" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></div>`;}).join(''):`<p class="mono text-[9px] text-stone-600 col-span-3">${t('none bound')}</p>`}</div>
+   <div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">${t('powers')}</div>
+   <div class="grid grid-cols-4 gap-2 mb-4">${POWER_KEYS.map(k=>{const pw=POWERS[k],rk=powerRank[k]||0;return `<div class="border border-stone-800 rounded p-2 text-center"><div class="serif text-xs" style="color:${GODC[pw.god]}">${t(pw.name)}</div><div class="mono text-[8px] text-stone-500">${rk>0?'•'.repeat(rk):t('locked')}</div></div>`;}).join('')}</div>
+   ${party.length?`<div class="mono text-[9px] uppercase tracking-widest text-stone-500 mb-1">${t('party')}</div><div class="grid grid-cols-2 gap-2 mb-2">${party.map(n=>`<div class="border border-stone-800 rounded p-2"><div class="mono text-[10px]" style="color:${npcColorHex(n.color)}">${n.name} Lv${n.level||level}</div><div class="mono text-[8px] text-stone-500">${ALLY[n.id].role} · ${n.downed?t('downed'):Math.round(n.hp)+'/'+n.maxHp+' hp'}</div></div>`).join('')}</div>`:''}
+   <button data-act="status" class="mt-2 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t('close')} ▸ (I)</button>
   </div></div>` : '';
   ui.innerHTML=`
    ${hitEls}
@@ -1401,58 +1631,58 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
        <span class="mono text-[10px] text-rose-300">HP</span><span class="inline-block w-24 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-rose-500" style="width:${hpPct}%"></span></span>
        <span class="mono text-[10px] text-sky-400">MP</span><span class="inline-block w-16 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-sky-500" style="width:${mnPct}%"></span></span>
        <span class="mono text-[10px] text-amber-300">XP</span><span class="inline-block w-14 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-amber-500" style="width:${xpPct}%"></span></span>
-       <span class="mono text-xs text-stone-500">day ${day}</span>
+       <span class="mono text-xs text-stone-500">${t('day')} ${day}</span>
        <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water}</span>
-       <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">tension ${Math.round(w.tension)}</span>
-       <span class="mono text-xs text-amber-300">read ${correct}/${reads.length}</span>
-       ${w.debts.length?`<span class="mono text-xs text-violet-300" title="Ithra holds a debt against you">◈ debt ${w.debts.length} <span class="text-stone-500">[P]</span></span>`:''}
+       <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">${t('tension')} ${Math.round(w.tension)}</span>
+       <span class="mono text-xs text-amber-300">${t('read')} ${correct}/${reads.length}</span>
+       ${w.debts.length?`<span class="mono text-xs text-violet-300" title="Ithra holds a debt against you">◈ ${t('debt')} ${w.debts.length} <span class="text-stone-500">[P]</span></span>`:''}
      </div>
-     <span class="flex gap-3 items-center"><button data-act="mind" class="pointer-events-auto mono text-[10px] ${godBackend==='supra'?'text-violet-400':'text-stone-500'} hover:text-stone-200" title="the god's mind: heuristic oracle, or awaken an in-browser LLM">${godLoading?`◍ waking ${godName} ${godPct}%`:(godBackend==='supra'?`◈ ${godName}`:'◇ awaken mind')}</button><button data-act="status" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="character sheet (I)">🜂</button><button data-act="chron" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="chronicle (K)">📜</button><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
+     <span class="flex gap-3 items-center"><button data-act="mind" class="pointer-events-auto mono text-[10px] ${godBackend==='supra'?'text-violet-400':'text-stone-500'} hover:text-stone-200" title="the god's mind: heuristic oracle, or awaken an in-browser LLM">${godLoading?`◍ ${t('waking')} ${godName} ${godPct}%`:(godBackend==='supra'?`◈ ${godName}`:`◇ ${t('awaken mind')}`)}</button><button data-act="status" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="character sheet (I)">🜂</button><button data-act="chron" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="chronicle (K)">📜</button><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
    </div>
    ${fxT>0?`<div class="absolute inset-0" style="background:${fxC};opacity:${(fxT*0.4).toFixed(2)}"></div>`:''}
    ${started&&!w.over&&crisis?`<div class="absolute top-14 left-5 max-w-[260px] pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em]" style="color:${GODC[crisis.god]}">⚠ ${t(crisis.title)} · ${GNAME(crisis.god)}</div><div class="serif text-[15px] text-stone-100 mt-0.5 leading-snug">◆ ${t(crisis.goal)}</div></div>`:''}
    ${started&&!w.over&&!crisis?`<div class="absolute top-14 left-5 pointer-events-none"><div class="mono text-[9px] uppercase tracking-[0.25em] text-stone-500">${t('the vale holds its breath…')}</div></div>`:''}
    ${started&&!w.over?`<div class="absolute top-14 right-4 pointer-events-none"><div class="mono text-[7px] uppercase tracking-widest text-stone-500 mb-0.5 text-right">${t(region)}</div><div class="relative rounded border border-stone-800 bg-black/50" style="width:${MM.w}px;height:${MM.h}px">${mmSites}${mmNpcs}${mmFoes}${mmHeroDot}</div></div>`:''}
    ${started&&!w.over?`<div class="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-none">${DEITY_IDS.map(d=>`<div><div class="mono text-[8px] mb-0.5 ${calling===d?'font-bold':''}" style="color:${GODC[d]}">${GNAME(d)}${calling===d?' ✦':''}</div><div class="w-2.5 h-16 rounded bg-stone-800 relative overflow-hidden"><div class="absolute bottom-0 w-full rounded" style="height:${piety[d]*10}%;background:${GODC[d]}"></div></div></div>`).join('')}</div>`:''}
-   ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">your party</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-16" style="color:${npcColorHex(n.color)}">${n.name} <span class="text-stone-600">Lv${n.level||level}</span></span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
+   ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">${t('your party')}</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-16" style="color:${npcColorHex(n.color)}">${n.name} <span class="text-stone-600">Lv${n.level||level}</span></span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
    ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${t(banner.t)}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${t(banner.brief)}</p></div>`:''}
    ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
-   ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} foe${foes>1?'s':''} in the vale</div>`:''}
+   ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} ${t(foes>1?'foes in the vale':'foe in the vale')}</div>`:''}
    ${toastT>0?`<div class="absolute top-28 left-1/2 -translate-x-1/2 mono text-xs text-amber-200 bg-black/60 px-3 py-1 rounded border border-stone-800">${t(toast)}</div>`:''}
-   ${invuln>0&&!w.over?`<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 serif italic text-rose-300 text-2xl">You fell. You rise again at Aldermere.</div>`:''}
+   ${invuln>0&&!w.over?`<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 serif italic text-rose-300 text-2xl">${t('You fell. You rise again at Aldermere.')}</div>`:''}
    ${started&&!w.over?`<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-end gap-3">
-     <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ Powers${points?` (${points})`:''}</button>
+     <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ ${t('Powers')}${points?` (${points})`:''}</button>
      <div class="flex gap-2">${skill}</div>
-     <div class="flex flex-col items-center"><span class="mono text-[7px] text-stone-600 mb-1">relics</span>${relicBar}</div>
-     <span class="mono text-[9px] text-stone-500 self-center leading-tight">SPACE strike · SHIFT roll<br/>I status · K chronicle</span>
+     <div class="flex flex-col items-center"><span class="mono text-[7px] text-stone-600 mb-1">${t('relics')}</span>${relicBar}</div>
+     <span class="mono text-[9px] text-stone-500 self-center leading-tight">${t('SPACE strike · SHIFT roll')}<br/>${t('I status · K chronicle')}</span>
    </div>`:''}
-   ${relicOffer?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="max-w-xl w-full px-6 text-center"><p class="mono text-[10px] uppercase tracking-[0.35em]" style="color:${TIER_COLOR[RELICS[relicOffer].tier]}">a relic — ${RELICS[relicOffer].tier}</p><p class="serif text-3xl text-stone-100 mt-2">${RELICS[relicOffer].name}</p><p class="serif italic text-stone-400 mt-1 mb-5">${RELICS[relicOffer].desc}</p><p class="mono text-[10px] text-stone-500 mb-2">your relics are full (${relicSlots}) — bind it in place of one, or leave it</p><div class="flex flex-wrap gap-2 justify-center">${relics.map((id,i)=>{const r=RELICS[id];return `<button data-act="relicswap:${i}" class="pointer-events-auto text-left w-48 p-2.5 rounded border hover:bg-stone-900" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></button>`;}).join('')}</div><button data-act="relicswap:-1" class="pointer-events-auto mono text-xs mt-4 px-4 py-2 rounded border border-stone-700 text-stone-400 hover:bg-stone-900">leave it behind</button></div></div>`:''}
+   ${relicOffer?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="max-w-xl w-full px-6 text-center"><p class="mono text-[10px] uppercase tracking-[0.35em]" style="color:${TIER_COLOR[RELICS[relicOffer].tier]}">${t('a relic —')} ${RELICS[relicOffer].tier}</p><p class="serif text-3xl text-stone-100 mt-2">${RELICS[relicOffer].name}</p><p class="serif italic text-stone-400 mt-1 mb-5">${RELICS[relicOffer].desc}</p><p class="mono text-[10px] text-stone-500 mb-2">${t('your relics are full')} (${relicSlots}) — ${t('bind it in place of one, or leave it')}</p><div class="flex flex-wrap gap-2 justify-center">${relics.map((id,i)=>{const r=RELICS[id];return `<button data-act="relicswap:${i}" class="pointer-events-auto text-left w-48 p-2.5 rounded border hover:bg-stone-900" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></button>`;}).join('')}</div><button data-act="relicswap:-1" class="pointer-events-auto mono text-xs mt-4 px-4 py-2 rounded border border-stone-700 text-stone-400 hover:bg-stone-900">${t('leave it behind')}</button></div></div>`:''}
    ${tree}
    ${statusPanel}
-   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">At the shrine…</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">1–4 offer${w.debts.length?' · <span class="text-violet-300">P settle a debt</span>':''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">E to leave</p></div>`:''}
+   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">${t('At the shrine…')}</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">${t('1–4 offer')}${w.debts.length?` · <span class="text-violet-300">${t('P settle a debt')}</span>`:''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">${t("0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.")}</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">${t('E to leave')}</p></div>`:''}
    ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${t(npcMenu.role)}</div></div></div>${npcDialogue}${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${t(npcMenu.quest.desc)}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ ${t('their charge is fulfilled')}</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] ${t('leave')}</div></div></div>`:''}
    ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] ${t('speak with')} <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${t(near.npc.role)}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${t(near.s.label)} — <span class="text-stone-500">${t(near.s.name)}</span>`}</span></div>`:''}
-   ${!npcMenu&&!near&&!w.over?`<div class="absolute left-1/2 bottom-10 -translate-x-1/2 mono text-[10px] text-stone-600">left-click move · Space strike · SHIFT roll · E speak/act · I status · K chronicle · seek the named folk of Aldermere</div>`:''}
+   ${!npcMenu&&!near&&!w.over&&day<3?`<div class="absolute left-1/2 bottom-28 -translate-x-1/2 mono text-[10px] text-stone-600">${t('seek the named folk of Aldermere')}</div>`:''}
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">
      <p class="serif text-5xl text-stone-100 tracking-[0.2em]">${t('THEODICY')}</p>
      <p class="serif italic text-stone-400 mt-2">${t('Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.')}</p>
      <div class="flex gap-2 justify-center mt-3">${[['en','EN'],['fr','FR'],['zh','繁中']].map(([code,label])=>`<button data-act="lang:${code}" class="pointer-events-auto mono text-[9px] px-2 py-0.5 rounded border ${LANG===code?'border-amber-600 text-amber-300':'border-stone-800 text-stone-600 hover:text-stone-300'}">${label}</button>`).join('')}</div>
-     ${saveAvailable?`<div class="mt-5 mb-1"><button data-act="resume" class="pointer-events-auto text-left w-80 max-w-full mx-auto block p-3 rounded-lg border border-amber-700/60 bg-amber-950/20 hover:bg-amber-950/40"><div class="mono text-xs text-amber-300">◆ resume your tale <span class="text-stone-500">[Enter]</span></div><div class="serif italic text-[12px] text-stone-400 mt-0.5">Lv ${saveAvailable.level} · day ${saveAvailable.day} · ${GNAME(saveAvailable.calling)}'s calling${saveAvailable.covenant?` · pledged to ${GNAME(saveAvailable.covenant)}`:''}</div></button></div><p class="mono text-[9px] text-stone-600 mb-1">— or begin a new tale —</p>`:''}
+     ${saveAvailable?`<div class="mt-5 mb-1"><button data-act="resume" class="pointer-events-auto text-left w-80 max-w-full mx-auto block p-3 rounded-lg border border-amber-700/60 bg-amber-950/20 hover:bg-amber-950/40"><div class="mono text-xs text-amber-300">◆ ${t('resume your tale')} <span class="text-stone-500">[Enter]</span></div><div class="serif italic text-[12px] text-stone-400 mt-0.5">Lv ${saveAvailable.level} · ${t('day')} ${saveAvailable.day} · ${GNAME(saveAvailable.calling)}${t("'s calling")}${saveAvailable.covenant?` · ${t('pledged to')} ${GNAME(saveAvailable.covenant)}`:''}</div></button></div><p class="mono text-[9px] text-stone-600 mb-1">${t('— or begin a new tale —')}</p>`:''}
      <p class="mono text-[11px] uppercase tracking-[0.3em] text-amber-400 mt-3 mb-3">${t('whom do you revere?')}&nbsp;&nbsp;[1–4]</p>
      <div class="flex flex-wrap gap-3 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="call:${d}" class="pointer-events-auto text-left w-52 p-3 rounded-lg border hover:bg-stone-900" style="border-color:${GODC[d]}66"><div class="mono text-xs mb-1" style="color:${GODC[d]}"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[CALLINGS[d].power].name}</span></div><div class="serif italic text-[12px] text-stone-400 leading-snug">${t(CALLINGS[d].blurb)}</div></button>`).join('')}</div>
      <p class="mono text-[9px] text-stone-600 mt-6">${t('left-click move · SPACE strike · SHIFT roll · Q/R/F/V powers · E act · K chronicle')}</p>
      <button data-act="mind" class="pointer-events-auto mono text-[10px] mt-4 px-3 py-1.5 rounded border ${godBackend==='supra'?'border-violet-700 text-violet-300':'border-stone-700 text-stone-500 hover:text-stone-300'}">${godLoading?`◍ waking ${godName}… ${godPct}%`:(godBackend==='supra'?`◈ the divine mind is awake (${godName})`:'◇ awaken the divine mind — a real LLM becomes the god (Qwen2.5-0.5B on WebGPU, ~480MB; else SmolLM2-360M)')}</button>
    </div></div>`:''}
-   ${covenantOpen&&!w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">The Covenant</p><p class="serif text-3xl text-stone-100 mt-3 mb-1">You have proven devotion. Pledge.</p><p class="serif italic text-stone-500 mb-5">Your patron grants their power — and their rival rises to test your oath.</p><div class="flex flex-wrap gap-2 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="cov:${i}" class="pointer-events-auto mono text-xs px-4 py-2.5 rounded border text-stone-200 hover:bg-stone-800" style="border-color:${GODC[d]}88"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[COV_POWER[d]].name} · devotion ${piety[d].toFixed(1)}</span></button>`).join('')}</div></div></div>`:''}
-   ${showChron&&started?`<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="chron"><div class="max-w-lg w-full border border-stone-800 rounded-lg bg-stone-950 p-5 max-h-[80vh] overflow-auto" data-act="stop"><div class="flex justify-between items-baseline mb-3"><h2 class="serif text-2xl text-stone-100">Chronicle of the Vale</h2><span class="mono text-[10px] text-stone-500">day ${day}</span></div>${chronicle.length?chronicle.map(r=>`<div class="border-b border-stone-900 py-1.5"><span class="mono text-[9px] uppercase" style="color:${GODC[r.god]}">${GNAME(r.god)} · ${r.verb}</span>${r.crisis?`<span class="mono text-[8px] ml-2 ${r.done?'text-emerald-400':'text-rose-400'}">${r.done?'answered':'unanswered'}</span>`:''}<div class="serif italic text-[12px] text-stone-300">“${r.omen||'—'}”</div></div>`).join(''):'<p class="serif italic text-stone-500">The gods have not yet moved.</p>'}<button data-act="chron" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">close ▸ (K)</button></div></div>`:''}
-   ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${omen.text}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">whose hand? 1–4</span>${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${PANTHEON[d].name.split(',')[0]}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?'✓ you knew the hand':'✗ it was '+PANTHEON[pending.actual].name.split(',')[0]}</p>`:''}</div></div>`:''}
+   ${covenantOpen&&!w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${t('The Covenant')}</p><p class="serif text-3xl text-stone-100 mt-3 mb-1">${t('You have proven devotion. Pledge.')}</p><p class="serif italic text-stone-500 mb-5">${t('Your patron grants their power — and their rival rises to test your oath.')}</p><div class="flex flex-wrap gap-2 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="cov:${i}" class="pointer-events-auto mono text-xs px-4 py-2.5 rounded border text-stone-200 hover:bg-stone-800" style="border-color:${GODC[d]}88"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${t(POWERS[COV_POWER[d]].name)} · ${t('devotion')} ${piety[d].toFixed(1)}</span></button>`).join('')}</div></div></div>`:''}
+   ${showChron&&started?`<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="chron"><div class="max-w-lg w-full border border-stone-800 rounded-lg bg-stone-950 p-5 max-h-[80vh] overflow-auto" data-act="stop"><div class="flex justify-between items-baseline mb-3"><h2 class="serif text-2xl text-stone-100">${t('Chronicle of the Vale')}</h2><span class="mono text-[10px] text-stone-500">${t('day')} ${day}</span></div>${chronicle.length?chronicle.map(r=>`<div class="border-b border-stone-900 py-1.5"><span class="mono text-[9px] uppercase" style="color:${GODC[r.god]}">${GNAME(r.god)} · ${r.verb}</span>${r.crisis?`<span class="mono text-[8px] ml-2 ${r.done?'text-emerald-400':'text-rose-400'}">${t(r.done?'answered':'unanswered')}</span>`:''}<div class="serif italic text-[12px] text-stone-300">“${t(r.omen)||'—'}”</div></div>`).join(''):`<p class="serif italic text-stone-500">${t('The gods have not yet moved.')}</p>`}<button data-act="chron" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t('close')} ▸ (K)</button></div></div>`:''}
+   ${omen?`<div class="absolute bottom-0 inset-x-0 px-6 pb-5 pt-10 bg-gradient-to-t from-black/95 to-transparent"><div class="max-w-2xl mx-auto text-center"><p class="serif italic text-stone-100 text-xl leading-snug">“${t(omen.text)}”</p>${pending&&!pending.result?`<div class="mt-2 pointer-events-auto flex gap-2 justify-center items-center"><span class="mono text-[10px] uppercase tracking-widest text-amber-300/80">${t('whose hand? 1–4')}</span>${DEITY_IDS.map((d,i)=>`<button data-act="acc:${i}" class="mono text-[11px] px-2 py-1 rounded border border-stone-700 text-stone-200 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</button>`).join('')}</div>`:pending&&pending.result?`<p class="mono text-[11px] mt-1 ${pending.result.correct?'text-emerald-400':'text-rose-400'}">${pending.result.correct?t('✓ you knew the hand'):t('✗ it was ')+GNAME(pending.actual)}</p>`:''}</div></div>`:''}
    ${w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6">
      <p class="mono text-[10px] uppercase tracking-[0.35em] ${w.won?'text-amber-400':'text-rose-400'}">${t(w.won?'The Tale Is Told':'The Vale Falls')}</p>
-     <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?PANTHEON[endKind].name.split(',')[0]+"'s Vale":'The vale is empty.'}</p>
-     <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?(END_TEXT[endKind]||'The vale endures under your watch.'):'Aldermere starved before you could name a god to save it.'}</p>
-     ${rival.stage>=3?`<p class="serif italic text-rose-200/90 text-[13px] mt-2 leading-snug">${rivalMet>=2?'You had crossed blades with Kaine twice before he stopped running. The third time, he did not.':rivalMet===1?'You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.':'A stranger called himself Kaine, and made his last stand where the ridge meets the vale.'}</p>`:''}
+     <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?GNAME(endKind)+t("'s Vale"):t('The vale is empty.')}</p>
+     <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?t(END_TEXT[endKind]||'The vale endures under your watch.'):t('Aldermere starved before you could name a god to save it.')}</p>
+     ${rival.stage>=3?`<p class="serif italic text-rose-200/90 text-[13px] mt-2 leading-snug">${t(rivalMet>=2?'You had crossed blades with Kaine twice before he stopped running. The third time, he did not.':rivalMet===1?'You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.':'A stranger called himself Kaine, and made his last stand where the ridge meets the vale.')}</p>`:''}
      <p class="serif italic text-[13px] mt-3 leading-snug">${NPCS.filter(x=>x.alive).length?`<span class="text-stone-400">${t('Still drawing breath:')}</span> <span class="text-emerald-300">${NPCS.filter(x=>x.alive).map(x=>x.name).join(', ')}</span>`:`<span class="text-rose-300">${t('None of the named folk survived.')}</span>`}${lostFolk.length?` <span class="text-stone-500">·</span> <span class="text-rose-400">${t('lost:')} ${lostFolk.join(', ')}</span>`:''}</p>
-     <p class="mono text-[11px] text-stone-500 mt-3">level ${level} · fell ${deaths}× · ${day} days · read ${correct}/${reads.length} hands · ${NPCS.filter(x=>x.state==='done').length}/${NPCS.length} charges kept</p>
+     <p class="mono text-[11px] text-stone-500 mt-3">Lv ${level} · ${t('fell')} ${deaths}× · ${day} ${t('days')} · ${t('read')} ${correct}/${reads.length} · ${NPCS.filter(x=>x.state==='done').length}/${NPCS.length} ${t('charges kept')}</p>
      <button data-act="restart" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t('begin anew')} ▸ (X)</button></div></div>`:''}`;
 }
 animate();   // renders behind the calling screen; the world wakes when you choose a god
