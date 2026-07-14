@@ -22,6 +22,8 @@
 <div id="ui" class="fixed inset-0 pointer-events-none select-none"></div>
 <script type="module">
 import * as THREE from 'https://esm.sh/three@0.160.0';
+import { FBXLoader } from 'https://esm.sh/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
+import * as SkeletonUtils from 'https://esm.sh/three@0.160.0/examples/jsm/utils/SkeletonUtils.js';
 import { newWorld, applyPlayerAction, upkeepTick, divineStrike, PANTHEON, DEITY_IDS, ranking } from './engine.js';
 import { HeuristicGod, InstructGod } from './gods.js';
 
@@ -225,94 +227,60 @@ for (const [id, s] of Object.entries(SITES)) {
   }
 }
 
-// ---- avatar ----
-// a cloaked wayfarer, layered primitives that read as a person — not a capsule
+// ---- avatar & character system: real rigged models (Kenney "Animated Characters 3", CC0 —
+// see game/models/LICENSE.txt), not primitives. Loaded once, cloned per instance via
+// SkeletonUtils so every hero/NPC/villager/enemy shares one skeleton + two animation clips
+// (idle, run) but animates independently.
 const hero = new THREE.Group();
-const _hm = (c,rg,mt)=>new THREE.MeshStandardMaterial({color:c,roughness:rg??0.8,metalness:mt||0});
-// ---- procedural cloth + face textures, cached per color so repeat spawns (raiders, villagers)
-// reuse one canvas/texture instead of paying a draw+upload every time. No image assets, no
-// build step — still fully code-generated, just richer than a flat MeshStandardMaterial color.
-const _clothTexCache = new Map(), _faceTexCache = new Map();
-function clothTexture(colorHex){
-  if(_clothTexCache.has(colorHex)) return _clothTexCache.get(colorHex);
-  const cv=document.createElement('canvas'); cv.width=64; cv.height=64; const x=cv.getContext('2d');
-  const hex='#'+colorHex.toString(16).padStart(6,'0'); x.fillStyle=hex; x.fillRect(0,0,64,64);
-  x.strokeStyle='rgba(0,0,0,0.10)'; x.lineWidth=1;
-  for(let i=0;i<64;i+=4){ x.beginPath(); x.moveTo(i,0); x.lineTo(i,64); x.stroke(); }
-  x.strokeStyle='rgba(255,255,255,0.06)';
-  for(let i=2;i<64;i+=5){ x.beginPath(); x.moveTo(0,i); x.lineTo(64,i); x.stroke(); }
-  const tex=new THREE.CanvasTexture(cv); tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(2.2,2.2);
-  _clothTexCache.set(colorHex,tex); return tex;
+const _fbxLoader = new FBXLoader();
+function loadFBX(url){ return new Promise((res,rej)=>_fbxLoader.load(url,res,undefined,rej)); }
+const [_charBase, _idleFbx, _runFbx] = await Promise.all([
+  loadFBX('./models/character.fbx'), loadFBX('./models/anim_idle.fbx'), loadFBX('./models/anim_run.fbx'),
+]);
+const IDLE_CLIP = _idleFbx.animations.find(a=>/idle/i.test(a.name));
+const RUN_CLIP = _runFbx.animations.find(a=>/run/i.test(a.name));
+const CHAR_SCALE = 0.012;   // native FBX units → world units — TUNING: adjust after a visual check
+const _texLoader = new THREE.TextureLoader();
+const SKIN_TEX = {};
+for(const k of ['human_male','human_female','zombie_male','zombie_female']){
+  const tex=_texLoader.load('./models/skins/'+k+'.png'); tex.colorSpace=THREE.SRGBColorSpace;
+  SKIN_TEX[k]=tex;
 }
-function faceTexture(skinHex){
-  if(_faceTexCache.has(skinHex)) return _faceTexCache.get(skinHex);
-  const cv=document.createElement('canvas'); cv.width=128; cv.height=128; const x=cv.getContext('2d');
-  x.fillStyle='rgba(0,0,0,0)'; x.clearRect(0,0,128,128);
-  const hex='#'+skinHex.toString(16).padStart(6,'0'); x.fillStyle=hex; x.fillRect(8,8,112,112);
-  const grad=x.createRadialGradient(64,80,8,64,80,58); grad.addColorStop(0,'rgba(0,0,0,0)'); grad.addColorStop(1,'rgba(0,0,0,0.14)');
-  x.fillStyle=grad; x.fillRect(8,8,112,112);
-  x.fillStyle='#241a14';
-  x.beginPath(); x.ellipse(46,60,9,5.5,0,0,Math.PI*2); x.fill();
-  x.beginPath(); x.ellipse(82,60,9,5.5,0,0,Math.PI*2); x.fill();
-  x.strokeStyle='rgba(30,20,14,0.4)'; x.lineWidth=3; x.lineCap='round';
-  x.beginPath(); x.moveTo(35,47); x.lineTo(57,45); x.stroke();
-  x.beginPath(); x.moveTo(71,45); x.lineTo(93,47); x.stroke();
-  x.strokeStyle='rgba(30,20,14,0.32)'; x.lineWidth=2.5;
-  x.beginPath(); x.moveTo(52,92); x.quadraticCurveTo(64,97,76,92); x.stroke();
-  const tex=new THREE.CanvasTexture(cv); tex.transparent=true;
-  _faceTexCache.set(skinHex,tex); return tex;
+const _mixers = [];   // every live AnimationMixer, ticked once per frame in animate()
+function makeCharacter(skinKey, tint){
+  const inner = SkeletonUtils.clone(_charBase);
+  inner.scale.setScalar(CHAR_SCALE);
+  const outer = new THREE.Group(); outer.add(inner);
+  let bodyMesh=null;
+  inner.traverse(o=>{ if(o.isMesh){ o.material=o.material.clone(); o.material.map=SKIN_TEX[skinKey]; o.material.color.setHex(0xffffff); o.material.roughness=0.85; o.material.metalness=0; o.material.emissive=new THREE.Color(0x000000); bodyMesh=o; } });
+  const mixer=new THREE.AnimationMixer(inner); _mixers.push(mixer);
+  const idleAction=mixer.clipAction(IDLE_CLIP), runAction=mixer.clipAction(RUN_CLIP);
+  idleAction.play(); runAction.play(); runAction.setEffectiveWeight(0);
+  let current='idle';
+  function setMoving(moving){
+    const want=moving?'run':'idle'; if(want===current) return; current=want;
+    const [activate,deactivate] = want==='run' ? [runAction,idleAction] : [idleAction,runAction];
+    activate.reset().fadeIn(0.25); deactivate.fadeOut(0.25);
+  }
+  let accent=null;
+  if(tint!=null){ accent=new THREE.Mesh(new THREE.PlaneGeometry(0.4,0.55), new THREE.MeshStandardMaterial({color:tint,roughness:1,side:THREE.DoubleSide})); accent.position.set(0,3.55,-0.4); outer.add(accent); }   // -0.4: clear of the torso mesh so it doesn't z-fight (lesson from the hero's cloak)
+  return { group:outer, body:bodyMesh, mixer, setMoving, accent };
 }
-// ---- a shared humanoid limb-builder: tapered limbs + joint spheres + a shoulders-wide/waist-narrow
-// torso read as a BODY, not a stack of rigid boxes — used by the hero, NPCs, villagers, and humanoid
-// enemies alike, so fixing "everyone looks like an android" fixes it everywhere at once.
-function humanoidBody(g, S, skinColor, clothColor, opts={}){
-  const clothTex = clothTexture(clothColor);
-  const mat=(c,rg,mt)=>{
-    if(c===clothColor) return new THREE.MeshStandardMaterial({map:clothTex, roughness:rg??0.96, metalness:mt||0});
-    return new THREE.MeshStandardMaterial({color:c, roughness:rg??0.88, metalness:mt||0});
-  };
-  for(const sx of [-1,1]){
-    const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.30*S,0.23*S,1.05*S,12), mat(clothColor)); thigh.position.set(sx*0.32*S,1.55*S,0); g.add(thigh);
-    const knee =new THREE.Mesh(new THREE.SphereGeometry(0.19*S,8,8), mat(clothColor)); knee.position.set(sx*0.32*S,1.05*S,0); g.add(knee);
-    const shin =new THREE.Mesh(new THREE.CylinderGeometry(0.21*S,0.14*S,0.9*S,12), mat(clothColor,0.96)); shin.position.set(sx*0.32*S,0.62*S,0); g.add(shin);
-    const foot =new THREE.Mesh(new THREE.BoxGeometry(0.26*S,0.2*S,0.5*S), mat(0x1c130c,0.95)); foot.position.set(sx*0.32*S,0.11*S,0.11*S); g.add(foot);
-  }
-  const hip  =new THREE.Mesh(new THREE.CylinderGeometry(0.56*S,0.48*S,0.55*S,14), mat(clothColor)); hip.position.y=2.15*S; g.add(hip);
-  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.72*S,0.54*S,1.5*S,14), mat(clothColor)); torso.position.y=3.0*S; g.add(torso);   // WIDE at shoulders, narrow at waist — a real torso silhouette
-  const neck =new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.24*S,0.32*S,8), mat(skinColor,0.9)); neck.position.y=3.9*S; g.add(neck);
-  const head =new THREE.Mesh(new THREE.SphereGeometry(0.54*S,12,12), mat(skinColor,0.9)); head.scale.set(0.92,1.08,0.9); head.position.y=4.42*S; g.add(head);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.62*S,0.62*S), new THREE.MeshStandardMaterial({map:faceTexture(skinColor), roughness:0.9, transparent:true}));
-  face.position.set(0,4.34*S,0.47*S); g.add(face);   // a front-facing decal — hidden behind a hood's own geometry when one is worn
-  if(opts.hair){
-    const hair=new THREE.Mesh(new THREE.SphereGeometry(0.565*S,10,10,0,Math.PI*2,0,Math.PI*0.56), new THREE.MeshStandardMaterial({color:opts.hair, roughness:0.85}));
-    hair.position.y=4.5*S; g.add(hair);
-  }
-  for(const sx of [-1,1]){
-    const shoulder=new THREE.Mesh(new THREE.SphereGeometry(0.24*S,8,8), mat(clothColor)); shoulder.position.set(sx*0.86*S,3.55*S,0); g.add(shoulder);
-    const upArm=new THREE.Mesh(new THREE.CylinderGeometry(0.2*S,0.16*S,0.82*S,8), mat(clothColor)); upArm.position.set(sx*0.86*S,3.15*S,0); g.add(upArm);
-    const elbow=new THREE.Mesh(new THREE.SphereGeometry(0.165*S,8,8), mat(clothColor)); elbow.position.set(sx*0.86*S,2.76*S,0); g.add(elbow);
-    const loArm=new THREE.Mesh(new THREE.CylinderGeometry(0.155*S,0.115*S,0.78*S,8), mat(skinColor,0.9)); loArm.position.set(sx*0.86*S,2.36*S,0); g.add(loArm);
-    const hand =new THREE.Mesh(new THREE.SphereGeometry(0.15*S,8,8), mat(skinColor,0.9)); hand.scale.set(0.85,1.05,0.8); hand.position.set(sx*0.86*S,1.95*S,0); g.add(hand);
-  }
-  return { hip, torso, neck, head };
-}
-const hbParts = humanoidBody(hero, 1, 0xcaa47a, 0x4a5360);
-const body = hbParts.torso;                            // torso — flashes on hurt
-const head = hbParts.head;
-const hood = new THREE.Mesh(new THREE.ConeGeometry(0.68,1.15,12), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:0.95})); hood.position.y=4.72; hero.add(hood);
-const cloak = new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshStandardMaterial({color:0x3b2f4a,roughness:1,side:THREE.DoubleSide})); cloak.position.set(0,3.1,-0.85); hero.add(cloak);   // -0.85: clear of the torso's own radius (0.72) so the flat cape doesn't pierce the solid cylinder and z-fight
-const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85})); blade.position.set(1.45,2.9,0.25); hero.add(blade);
-const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.16,0.18), new THREE.MeshStandardMaterial({color:0x2a1c10,roughness:0.9})); hilt.position.set(1.45,1.85,0.25); hero.add(hilt);
+const heroChar = makeCharacter('human_male', null);
+hero.add(heroChar.group);
+const body = heroChar.body;                            // the model's material — flashes on hurt
+const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.36), new THREE.MeshStandardMaterial({color:0xd7dde3,roughness:0.25,metalness:0.85})); blade.position.set(1.05,2.6,0.25); hero.add(blade);
 hero.position.set(8,0,8); scene.add(hero);
 
 // ---- villagers: small autonomous agents wandering Aldermere ----
 const villagers = [];
-const VILLAGER_HAIR = [0x2e2015,0x1c1712,0x4a3222,0x6b5744,0x3a2a1c];
+const VILLAGER_SKINS = ['human_male','human_female'];
 for (let i=0;i<5;i++){
   const m = new THREE.Group();
-  const { torso } = humanoidBody(m, 0.82, 0xc9b28f, 0x6b5a45, {hair:VILLAGER_HAIR[i%VILLAGER_HAIR.length]});
+  const vc = makeCharacter(VILLAGER_SKINS[i%2], null);
+  m.add(vc.group); m.scale.setScalar(0.82);
   m.position.set(8 + (Math.random()*12-6), 0, 8 + (Math.random()*12-6)); scene.add(m);
-  villagers.push({ mesh:m, body:torso, tgt:null, seed:Math.random()*6.28 });
+  villagers.push({ mesh:m, body:vc.body, char:vc, tgt:null, seed:Math.random()*6.28 });
 }
 
 // ---- NAMED FOLK OF ALDERMERE: the social pillar — talk (E), take their charge, be remembered ----
@@ -411,13 +379,14 @@ function makeNameplate(text, hex){
   spr.scale.set(8.5,2.1,1); spr.position.y=6.6; return spr;
 }
 function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
-const NPC_HAIR = { maren:0x4a3222, oda:0x2e2015, bran:0x1c1712, sela:0x6b5744 };
+const NPC_SKIN = { maren:'human_female', oda:'human_female', bran:'human_male', sela:'human_female' };
 function buildNPC(n){
   const g=new THREE.Group();
-  const { torso } = humanoidBody(g, 0.92, 0xcaa47a, n.color, {hair:NPC_HAIR[n.id]});
+  const nc = makeCharacter(NPC_SKIN[n.id]||'human_male', n.color);   // the god-color accent carries their identity now that the body itself is a natural skin tone
+  g.add(nc.group); g.scale.setScalar(0.92);
   g.add(makeNameplate(n.name, npcColorHex(n.color)));
   g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
-  n.mesh=g; n.body=torso; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
+  n.mesh=g; n.body=nc.body; n.char=nc; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
   n.trust=0; n.asked=[]; n._topic=null; n._aside='';   // relationship + dialogue-topic state
 }
 NPCS.forEach(buildNPC);
@@ -478,8 +447,9 @@ function updateParty(dt){
     const tgt = nearestEnemyTo(n.mesh.position.x, n.mesh.position.z, 34);
     if(tgt && a.role==='blade'){ tx=tgt.mesh.position.x; tz=tgt.mesh.position.z; engaging=true; }
     const dx=tx-n.mesh.position.x, dz=tz-n.mesh.position.z, d=Math.hypot(dx,dz), spd=(a.role==='blade'?22:16);
-    if(d>(engaging?3.5:1.5)){ n.mesh.position.x+=dx/d*spd*dt; n.mesh.position.z+=dz/d*spd*dt; n.mesh.rotation.y=Math.atan2(dx,dz); }
-    n.mesh.position.y = Math.sin(clock.elapsedTime*4+idx)*0.1;
+    const partyMoving = d>(engaging?3.5:1.5);
+    if(partyMoving){ n.mesh.position.x+=dx/d*spd*dt; n.mesh.position.z+=dz/d*spd*dt; n.mesh.rotation.y=Math.atan2(dx,dz); }
+    if(n.char) n.char.setMoving(partyMoving);
     n.cd -= dt;
     if(n.cd<=0){
       if(a.role==='blade'){ if(tgt && d<=4.2){ tgt.hp-=dmg; tgt.hit=0.15; addHit(tgt.mesh.position,dmg); n.cd=a.cd; } else n.cd=0.2; }
@@ -1052,10 +1022,11 @@ function enemyMesh(x,z,T){ const m=new THREE.Group(); const S=T.scale;
     const tl=new THREE.Mesh(new THREE.ConeGeometry(0.22*S,1.3*S,6), mat()); tl.rotation.z=Math.PI/2.6; tl.position.set(-1.4*S,1.35*S,0); m.add(tl);
   } else {                                              // a humanoid foe — raider / brute / champion
     const HS = S*1.35;                                  // *1.35: enemyMesh's old scale baked in bigger proportions than the hero's
-    humanoidBody(m, HS, 0x6b4636, T.color, T.boss?{}:{hair:0x241a12});   // no hair on the Champion — horns sit where a hairline would
+    const ec = makeCharacter('zombie_male', T.color);   // zombie skin reads hostile at a glance; the god-color accent keeps per-type identity
+    m.add(ec.group); ec.group.scale.setScalar(HS); m.userData.char = ec;
     if(T.boss){                                         // Champion of Kel: horns + greatsword, sized off the NEW head/shoulder height
-      for(const sx of [-1,1]){ const horn=new THREE.Mesh(new THREE.ConeGeometry(0.18*S,0.9*S,6), mat(0xe5e0d5)); horn.position.set(sx*0.42*HS,6.25*HS,0); horn.rotation.z=sx*0.5; m.add(horn); }
-      const gs=new THREE.Mesh(new THREE.BoxGeometry(0.28*S,3.8*S,0.6*S), mat(0xb7bdc4)); gs.position.set(1.15*HS,3.9*HS,0.2*S); m.add(gs);
+      for(const sx of [-1,1]){ const horn=new THREE.Mesh(new THREE.ConeGeometry(0.18*S,0.9*S,6), mat(0xe5e0d5)); horn.position.set(sx*0.25*HS,5.0*HS,0); horn.rotation.z=sx*0.5; m.add(horn); }   // 5.0*HS: just above the real model's head-top (measured ~4.35*HS), not the old primitive-body constant (6.25)
+      const gs=new THREE.Mesh(new THREE.BoxGeometry(0.28*S,3.8*S,0.6*S), mat(0xb7bdc4)); gs.position.set(0.9*HS,3.3*HS,0.2*S); m.add(gs);
     } else { const wpn=new THREE.Mesh(new THREE.BoxGeometry(0.2*S,2.1*S,0.42*S), mat(0x8a8f96)); wpn.position.set(1.0*HS,3.4*HS,0.2*S); m.add(wpn); }
   }
   m.position.set(x,0,z); scene.add(m); return m; }
@@ -1103,10 +1074,12 @@ function updateCombat(dt){
       if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
     if(e.dying){ e.dying-=dt; e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
-    e.mesh.children.forEach(c=>c.material.emissive.setHex(e.hit>0?0xffffff:(e.telegraph>0?0xff6a00:0x3a0d0d))); if(e.hit>0)e.hit-=dt; if(e.slow>0)e.slow-=dt;
+    e.mesh.traverse(c=>{ if(c.isMesh) c.material.emissive.setHex(e.hit>0?0xffffff:(e.telegraph>0?0xff6a00:0x3a0d0d)); }); if(e.hit>0)e.hit-=dt; if(e.slow>0)e.slow-=dt;
     const dh=hero.position.distanceTo(e.mesh.position), tgt = dh<30 ? hero.position : vc;
     const dir=new THREE.Vector3(tgt.x-e.mesh.position.x,0,tgt.z-e.mesh.position.z), d=dir.length();
-    if(d>3+e.r){ if(e.telegraph>0){ e.telegraph=0; e.mesh.scale.setScalar(1); } dir.normalize(); e.mesh.position.addScaledVector(dir,(e.slow>0?e.spd*0.4:e.spd)*dt); e.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
+    const chasing = d>3+e.r;
+    if(e.mesh.userData.char) e.mesh.userData.char.setMoving(chasing);
+    if(chasing){ if(e.telegraph>0){ e.telegraph=0; e.mesh.scale.setScalar(1); } dir.normalize(); e.mesh.position.addScaledVector(dir,(e.slow>0?e.spd*0.4:e.spd)*dt); e.mesh.rotation.y=Math.atan2(dir.x,dir.z); }
     else if(e.telegraph>0){                               // winding up — a readable warning before the strike actually lands, so dodge (SHIFT) has something to react to
       e.telegraph-=dt; e.mesh.scale.setScalar(1+Math.sin(clock.elapsedTime*24)*0.07);
       if(e.telegraph<=0){ e.mesh.scale.setScalar(1); e.cool=1;
@@ -1259,6 +1232,7 @@ function animate(){
         .finally(() => { divBusy = false; }); }   // ALWAYS release — else a single throw silences the gods forever
   }
   // move (world-relative)
+  const _heroPrevX=hero.position.x, _heroPrevZ=hero.position.z;
   if(dodgeCd>0) dodgeCd-=dt;
   if(dodgeT>0 && started && !w.over){ dodgeT-=dt; hero.position.x+=dodgeDir.x*62*dt; hero.position.z+=dodgeDir.z*62*dt; }
   else if(started && !busy && !w.over){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));
@@ -1275,6 +1249,8 @@ function animate(){
       const ddx=moveTarget.x-hero.position.x, ddz=moveTarget.z-hero.position.z, d=Math.hypot(ddx,ddz);
       if(d>1.3){ hero.position.x+=ddx/d*spd*dt; hero.position.z+=ddz/d*spd*dt; hero.rotation.y=Math.atan2(ddx,ddz); } else moveTarget=null; } }
   hero.position.x=THREE.MathUtils.clamp(hero.position.x,-95,105); hero.position.z=THREE.MathUtils.clamp(hero.position.z,-195,90);   // -195: the Ashfields, past the ridge
+  heroChar.setMoving(Math.hypot(hero.position.x-_heroPrevX,hero.position.z-_heroPrevZ) > 0.001);
+  for(const mx of _mixers) mx.update(dt);
   if(!seenAshfields && hero.position.z<-105){ seenAshfields=true; banner={t:'The Ashfields', brief:"You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps."}; bannerT=6; }
   if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.mesh.position.x,hero.position.z-npcMenu.mesh.position.z)>(npcMenu.ally?15:13))) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
@@ -1305,14 +1281,15 @@ function animate(){
     }
     const spd = flee ? 15 : thirst ? 9 : 6.5;
     const dir = vlg.tgt.clone().sub(vlg.mesh.position); dir.y = 0; const d = dir.length();
-    if (d > 0.1) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, spd*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
+    const moving = d > 0.1;
+    if (moving) { dir.normalize(); vlg.mesh.position.addScaledVector(dir, spd*dt); vlg.mesh.rotation.y = Math.atan2(dir.x, dir.z); }
+    vlg.char.setMoving(moving);
     vlg.body.material.emissive.setHex(flee ? 0x3a0d0d : 0x000000);   // fear tints them
   }
-  // named folk: bob gently; glow amber when their god's crisis is upon them, green when their charge is met
+  // named folk: idle in place; glow amber when their god's crisis is upon them, green when their charge is met
   for(const n of NPCS){ if(!n.alive||!n.body||n.ally) continue;   // allies are driven by updateParty
     const inPeril = crisis && crisis.god===n.god && !crisis.resolved;
-    n.body.material.emissive.setHex(inPeril ? 0x5a3a0a : (n.state==='done' ? 0x0a2a12 : 0x000000));
-    n.mesh.position.y = Math.sin(clock.elapsedTime*1.6 + n.pos[0]) * 0.12; }
+    n.body.material.emissive.setHex(inPeril ? 0x5a3a0a : (n.state==='done' ? 0x0a2a12 : 0x000000)); }
   // tension → ember light + sky tint
   const t=w.tension/100; ember.intensity=t*2.4; scene.fog.color.setRGB(0.06+t*0.22,0.04,0.04); sky.material.uniforms.bot.value.setRGB(0.22+t*0.4,0.1,0.09);
   // billboards glow by wrath; ridge fires; well colour
