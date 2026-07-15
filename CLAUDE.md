@@ -5,11 +5,11 @@ Claude Code. Read this before touching anything.
 
 ## Machines
 
-- **`luigi-inspiron135330`** (this Dell) — the repo lives at `~/Games/god-rpg`. Remote is
-  `github.com/vieenrose/theodicy` over HTTPS (SSH keys are not set up; `gh auth setup-git`
-  handles credentials).
-- **`user@training-machine`** — RTX 3060. Where the model gets trained. Reach it over ssh.
-  Nothing is installed there yet unless Luigi has since rsync'd this repo across.
+- **`training-machine`** — where Claude Code sessions now run: this IS the RTX 3060 box
+  (check `hostname` before ssh'ing anywhere — `ssh user@training-machine` from here is a
+  loopback). Repo at `/home/user/god-rpg`; training ckpts in `ckpt/`, GPU local. Git remote is
+  `github.com/vieenrose/theodicy` over HTTPS (`gh auth setup-git` handles credentials).
+- **`luigi-inspiron135330`** (Luigi's Dell) — the original home; repo at `~/Games/god-rpg`.
 
 ## The one idea — do not lose this
 
