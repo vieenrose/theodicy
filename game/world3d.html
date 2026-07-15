@@ -105,6 +105,7 @@ const AUDIO = (() => {
     omen:   ()=>{ tone(69,1.3,'sine',0.2); bell(207,now(),0.05); },
     death:  ()=>{ tone(220,1.1,'sawtooth',0.22,55); },
     boss:   ()=>{ tone(48,1.8,'sawtooth',0.28); [0,3,7].forEach((s,i)=>setTimeout(()=>tone(110*Math.pow(2,s/12),0.6,'square',0.13),i*150)); },
+    victory:()=>{ [0,4,7,12,7,12].forEach((s,i)=>setTimeout(()=>tone(523*Math.pow(2,s/12),0.35,'triangle',0.16),i*110)); bell(1046,now()+0.7,0.1); },   // the fanfare a fallen champion deserves
   };
   function toggleMute(){ muted=!muted; if(master) master.gain.linearRampToValueAtTime(muted?0:0.9, now()+0.3);
     for(const k in tracks){ if(muted) tracks[k].pause(); else tracks[k].play().catch(()=>{}); } }  // stop decoding, not just silence
@@ -898,6 +899,7 @@ const T = {
     "The Count Comes Out Wrong":"Le Compte Tombe Faux",
     "\"Harl keeps your graves, Kaine. He counted you among the living.\" The greatsword wavers — and lowers.":"« Harl garde vos tombes, Kaine. Il t'a compté parmi les vivants. » L'épée à deux mains vacille — puis s'abaisse.",
     "You spoke the deserter's count, and the Wolf lowered his blade. He walked back into the ash — to keep the graves, with Harl.":"Vous avez dit le compte du déserteur, et le Loup a baissé sa lame. Il est retourné dans la cendre — garder les tombes, avec Harl.",
+    "Kel's champion falls — the ridge holds its breath.":"Le champion de Kel tombe — la crête retient son souffle.",
   },
   zh: {
     'THEODICY':'神義論',
@@ -1187,6 +1189,7 @@ const T = {
     "The Count Comes Out Wrong":"算式出錯之時",
     "\"Harl keeps your graves, Kaine. He counted you among the living.\" The greatsword wavers — and lowers.":"「哈爾守著你們的墳墓，凱恩。他把你算在生者之列。」巨劍顫了顫——然後垂了下去。",
     "You spoke the deserter's count, and the Wolf lowered his blade. He walked back into the ash — to keep the graves, with Harl.":"你說出了逃兵的算式，狼垂下了他的刀。他走回灰燼之中——與哈爾一同，守著那些墳墓。",
+    "Kel's champion falls — the ridge holds its breath.":"凱爾的勇士倒下了——山脊屏住了呼吸。",
   },
 };
 // ---- minimap: a small DOM overlay, world (x,z) -> panel pixels. No second camera/render pass. ----
@@ -1228,7 +1231,8 @@ function resolvePeace(e){                                 // the other ending: H
 function spawnRivalEncounter(stage){ const T=ETYPES['kaine'+stage], rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.1));
   const L=RIVAL_LINES[stage]; banner={t:L.title, brief:L.brief}; bannerT=5.5;
   enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp, tname:T.name,
-    isRival:true, rivalStage:stage, fleeAt:Math.round(hp*0.35), cool:0,telegraph:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); }
+    isRival:true, rivalStage:stage, fleeAt:Math.round(hp*0.35), cool:0,telegraph:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss();
+  startCine(rp[0], rp[2]+14, 3.4); }   // the Wolf's entrances deserve a shot of their own
 // how each divine VERB lands as a crisis the player must answer (keyed to engine.js verbs)
 const CRISES={
   poison:{god:'vurm', title:'The Souring',     goal:'Cleanse the fouled well — tend it  [E]',   kind:'well'},
@@ -1274,10 +1278,46 @@ function checkPortent(act){
     lastPortentT = clock.elapsedTime; const line = th.apply();
     banner = {t:'A Sign Made Real', brief:line}; bannerT = 5; addPiety(th.god, 0.3); return; } }
 }
+// ---- divine manifestations: when a god ACTS, the world SHOWS it. This is Theodicy's summon-
+// spectacle — the act was always real (ledger, crisis, tension); now it is also visible.
+// Each deity manifests at its own seat: Vurm rains over the well, Kel's embers rise off the
+// ridge, Oss's motes lift from the village, Ithra's judgement descends as a column at the shrine.
+const manifests = [];
+const GOD_SEAT = { vurm:'well', kel:'ridge', oss:'village', ithra:'shrine' };
+const GOD_HUE  = { vurm:0x3b82f6, kel:0xef4444, oss:0xfbbf24, ithra:0xa78bfa };
+function manifestGod(god){
+  const pos = SITES[GOD_SEAT[god]].pos, color = GOD_HUE[god];
+  const N=170, geo=new THREE.BufferGeometry(), arr=new Float32Array(N*3);
+  for(let i=0;i<N;i++){ arr[i*3]=pos[0]+(Math.random()*34-17); arr[i*3+1]=Math.random()*24+6; arr[i*3+2]=pos[2]+(Math.random()*34-17); }
+  geo.setAttribute('position', new THREE.BufferAttribute(arr,3));
+  const pts=new THREE.Points(geo, new THREE.PointsMaterial({color, size:0.55, transparent:true, opacity:0.95, depthWrite:false}));
+  scene.add(pts);
+  const light=new THREE.PointLight(color, 3.2, 110); light.position.set(pos[0], 22, pos[2]); scene.add(light);
+  let beam=null;
+  if(god==='ithra'){ beam=new THREE.Mesh(new THREE.CylinderGeometry(2.2,3.2,60,12,1,true),
+    new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.28, side:THREE.DoubleSide, depthWrite:false}));
+    beam.position.set(pos[0],30,pos[2]); scene.add(beam); }
+  const vy = god==='oss' ? 7 : god==='kel' ? 5 : -11;     // mercy and war-embers RISE; water and the rest fall
+  manifests.push({ t:0, dur:4.5, update(dt){
+    this.t+=dt; const p=geo.attributes.position.array;
+    for(let i=0;i<N;i++){ p[i*3+1]+=vy*dt; if(vy<0&&p[i*3+1]<0.4)p[i*3+1]=26; if(vy>0&&p[i*3+1]>28)p[i*3+1]=4; }
+    geo.attributes.position.needsUpdate=true;
+    const k=Math.min(1,this.t/this.dur);
+    pts.material.opacity=0.95*(1-k*k); light.intensity=3.2*(1-k);
+    if(beam){ beam.material.opacity=0.28*(1-k); beam.rotation.y+=dt*0.8; }
+    if(this.t>=this.dur){ scene.remove(pts); scene.remove(light); if(beam) scene.remove(beam); return false; }
+    return true; } });
+}
+// ---- cinematic moments: a letterboxed, slow-orbit camera when the story earns it (Kaine's
+// entrances, the final trial). The world keeps running — drama, not a pause screen.
+let cine=null;
+function startCine(x,z,dur=3.4){ if(!started||w.over) return; cine={t:0,dur,x,z};
+  camera.position.set(x+Math.sin(2.2)*24, 14, z+Math.cos(2.2)*24); }   // CUT to the shot (FF8 cuts, it doesn't fly) — a lerp from afar tracks THROUGH the subject
 function onGodAct(act){                                   // THE hook: one real divine choice → story
   chronicle.unshift({turn:act.turn, god:act.deity, verb:act.verb, omen:act.omen,
                      crisis:(CRISES[act.verb]||{}).title, done:false});
   if(chronicle.length>24) chronicle.pop();
+  manifestGod(act.deity);
   checkPortent(act);
   if(['mend','shelter','respite'].includes(act.verb)){ addPiety('oss',0.5); toast=t('Oss stays the ruin.'); toastT=2.5; }
   else if(act.verb==='reveal'){ addPiety('ithra',0.4); }
@@ -1286,7 +1326,8 @@ function onGodAct(act){                                   // THE hook: one real 
 }
 function forceChampion(){ if(enemies.some(e=>e.boss&&!e.dying)) return; const T=ETYPES.champion, rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.12));
   enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp,boss:true,tname:T.name,
-    isRival:true, rivalStage:3, fleeAt:null, cool:0,telegraph:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); rival.stage=3; }   // his true, unfleeing form
+    isRival:true, rivalStage:3, fleeAt:null, cool:0,telegraph:0,slow:0,dying:0,hit:0,dead:false }); AUDIO.sfx.boss(); rival.stage=3;
+  startCine(rp[0], rp[2]+14, 4.2); }   // his true, unfleeing form — hold the shot a beat longer
 function maybeOfferCovenant(){                            // earned, not handed: prove devotion first
   if(covenant||covenantOpen||trialOn||crisis) return;
   if(day>=3 && Math.max(...DEITY_IDS.map(d=>piety[d]))>=6) covenantOpen=true; }
@@ -1460,7 +1501,7 @@ function updateCombat(dt){
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
       if(e.crisisTag && e.crisisTag===crisis && !crisis.resolved){ crisis.pending=Math.max(0,(crisis.pending||0)-1); if(crisis.pending<=0) resolveCrisis(); }   // only THIS wave counts
       { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
-      if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
+      if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; AUDIO.sfx.victory(); fx3('#fbbf24'); dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won — with the fanfare it deserves
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
     if(e.dying){ e.dying-=dt;
       if(e.mesh.userData.char && !e.fleeing){ const k=1-Math.max(0,e.dying)/0.45; e.mesh.rotation.x=-k*1.5; e.mesh.position.y=-k*0.4; }   // humanoids topple backward and settle
@@ -1630,7 +1671,7 @@ function animate(){
   const _heroPrevX=hero.position.x, _heroPrevZ=hero.position.z;
   if(dodgeCd>0) dodgeCd-=dt;
   if(dodgeT>0 && started && !w.over && !paused){ dodgeT-=dt; hero.position.x+=dodgeDir.x*62*dt; hero.position.z+=dodgeDir.z*62*dt; }
-  else if(started && !busy && !w.over && !paused){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));
+  else if(started && !busy && !w.over && !paused && !cine){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));   // during a cinematic the camera owns the moment
     if(keys.has('w')||keys.has('arrowup'))dz--; if(keys.has('s')||keys.has('arrowdown'))dz++;
     if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
     if(dx||dz){ moveTarget=null; attackTarget=null; const m=Math.hypot(dx,dz); hero.position.x+=dx/m*spd*dt; hero.position.z+=dz/m*spd*dt; hero.rotation.y=Math.atan2(dx,dz); }   // WASD overrides click
@@ -1661,12 +1702,23 @@ function animate(){
   AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
   if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
-  // camera follows (behind + above)
-  // third-person follow: trail behind the hero's facing
-  const fwd = new THREE.Vector3(Math.sin(hero.rotation.y), 0, Math.cos(hero.rotation.y));
-  const camPos = hero.position.clone().addScaledVector(fwd, -30).add(new THREE.Vector3(0, 22, 0));
-  camera.position.lerp(camPos, 0.09);
-  camera.lookAt(hero.position.x, 6, hero.position.z);
+  // divine manifestations tick (particles/light/beam per active god-act)
+  for(let i=manifests.length-1;i>=0;i--) if(!manifests[i].update(dt)) manifests.splice(i,1);
+  // camera: cinematic orbit when the story earns it, else third-person follow
+  if(cine){
+    cine.t+=dt;                                          // runs on wall-time regardless of menus — it's short
+    const ang = cine.t*0.35 + 2.2;
+    const target = new THREE.Vector3(cine.x + Math.sin(ang)*24, 14, cine.z + Math.cos(ang)*24);
+    camera.position.lerp(target, 0.18);                  // already AT the shot (startCine cuts) — this only eases the slow orbit
+    camera.lookAt(cine.x, 4.5, cine.z);
+    if(cine.t>=cine.dur) cine=null;
+  } else {
+    // third-person follow: trail behind the hero's facing
+    const fwd = new THREE.Vector3(Math.sin(hero.rotation.y), 0, Math.cos(hero.rotation.y));
+    const camPos = hero.position.clone().addScaledVector(fwd, -30).add(new THREE.Vector3(0, 22, 0));
+    camera.position.lerp(camPos, 0.09);
+    camera.lookAt(hero.position.x, 6, hero.position.z);
+  }
   // villagers as autonomous agents: a condition→action policy over the same world
   // the gods read — flee the ridge when war boils, seek the well when it thirsts,
   // else keep to home. Same "generate a lawful action from state" idea as the god.
@@ -1694,7 +1746,7 @@ function animate(){
   const t=w.tension/100; ember.intensity=t*2.4; scene.fog.color.setRGB(0.06+t*0.22,0.04,0.04); sky.material.uniforms.bot.value.setRGB(0.22+t*0.4,0.1,0.09);
   // billboards glow by wrath; ridge fires; well colour
   const anger=Object.fromEntries(ranking(w).map(r=>[r.deity,r.anger])); const maxA=Math.max(1,...Object.values(anger).map(Math.abs));
-  for(const [id,s] of Object.entries(SITES)){ if(s.glow){ s.glow.intensity=0.4+1.6*THREE.MathUtils.clamp(anger[s.deity]/maxA,0,1); } if(s.deity&&billboards[id]) billboards[id].position.y=16+Math.sin(clock.elapsedTime*1.5+id.length)*0.6; }
+  for(const [id,s] of Object.entries(SITES)){ if(s.glow){ s.glow.intensity=0.4+1.6*THREE.MathUtils.clamp(anger[s.deity]/maxA,0,1); } if(s.deity&&billboards[id]){ billboards[id].visible=!cine; billboards[id].position.y=16+Math.sin(clock.elapsedTime*1.5+id.length)*0.6; } }
   if(SITES.well.water) SITES.well.water.material.color.setHex(w.sites.well.clean?0x3b82c4:0x84812f);
   // ridge fires ~ bandits
   const fg=SITES.ridge.fireGrp; while(fg.children.length<w.bandits.strength){ const f=new THREE.Mesh(new THREE.ConeGeometry(0.8,2.4,6), new THREE.MeshStandardMaterial({color:0xf97316,emissive:0xf97316})); f.position.set(-8+fg.children.length*3,1.2,0); fg.add(f);} while(fg.children.length>w.bandits.strength) fg.remove(fg.children[fg.children.length-1]);
@@ -1791,6 +1843,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
   </div></div>` : '';
   ui.innerHTML=`
    ${hitEls}
+   ${cine?`<div class="absolute top-0 inset-x-0 h-16 bg-black"></div><div class="absolute bottom-0 inset-x-0 h-16 bg-black"></div>`:''}
    <div class="absolute top-0 inset-x-0 flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/80 to-transparent">
      <div class="flex gap-3.5 items-center flex-wrap">
        <span class="serif text-xl text-stone-100 tracking-widest">THEODICY</span>
