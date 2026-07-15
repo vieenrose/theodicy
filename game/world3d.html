@@ -176,17 +176,32 @@ scene.add(new THREE.HemisphereLight(0x8899bb, 0x1a1410, 0.55));
 const key = new THREE.DirectionalLight(0xffd9a8, 1.0); key.position.set(-40, 60, 20); scene.add(key);
 const ember = new THREE.PointLight(0xff5533, 0.0, 220); ember.position.set(30, 30, -60); scene.add(ember); // grows with tension
 
-// ground
+// ground — a mottled moor texture (canvas noise), not a flat color plane
+function groundTexture(){
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=256; const x=cv.getContext('2d');
+  x.fillStyle='#1a2418'; x.fillRect(0,0,256,256);
+  for(let i=0;i<2600;i++){                                // grass/dirt mottling in the same dusk palette
+    const r=Math.random();
+    x.fillStyle = r<0.45?'rgba(34,48,28,0.5)' : r<0.75?'rgba(20,28,18,0.55)' : r<0.92?'rgba(44,54,32,0.35)' : 'rgba(58,48,30,0.3)';
+    const s=1+Math.random()*3;
+    x.fillRect(Math.random()*256, Math.random()*256, s, s*(0.5+Math.random()));
+  }
+  const tex=new THREE.CanvasTexture(cv); tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(26,26); return tex;
+}
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
-  new THREE.MeshStandardMaterial({ color: 0x1a2418, roughness: 1 }));
+  new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 }));
 ground.rotation.x = -Math.PI/2; scene.add(ground);
 // river (a flat ribbon)
 const river = new THREE.Mesh(new THREE.PlaneGeometry(220, 8),
   new THREE.MeshStandardMaterial({ color: 0x24557d, roughness: 0.4, metalness: 0.2 }));
 river.rotation.x = -Math.PI/2; river.rotation.z = 0.5; river.position.set(-10, 0.1, 10); scene.add(river);
-// northern ridge (cones)
-for (let i=0;i<9;i++){ const h=14+Math.random()*16; const c=new THREE.Mesh(new THREE.ConeGeometry(10+Math.random()*8, h, 5),
-  new THREE.MeshStandardMaterial({ color: 0x16100b, roughness:1 })); c.position.set(-90+i*22, h/2-1, -95+Math.random()*10); scene.add(c); }
+// northern ridge — rock cones with a stone face (not featureless black), scree at the feet
+for (let i=0;i<9;i++){ const h=14+Math.random()*16; const c=new THREE.Mesh(new THREE.ConeGeometry(10+Math.random()*8, h, 6),
+  new THREE.MeshStandardMaterial({ color: 0x241c14, roughness:1, flatShading:true })); c.position.set(-90+i*22, h/2-1, -95+Math.random()*10); scene.add(c);
+  const cap=new THREE.Mesh(new THREE.ConeGeometry(2.4+Math.random()*1.6, h*0.24, 6), new THREE.MeshStandardMaterial({color:0x4a4238, roughness:1, flatShading:true}));
+  cap.position.set(c.position.x, h-1-h*0.11, c.position.z); scene.add(cap);   // bare stone crown where the tree line gives out
+  for(let r=0;r<3;r++){ const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(0.9+Math.random()*1.4,0), new THREE.MeshStandardMaterial({color:0x2e261c,roughness:1,flatShading:true}));
+    rock.position.set(c.position.x+(Math.random()*16-8), 0.6, c.position.z+8+Math.random()*6); rock.rotation.set(Math.random(),Math.random(),Math.random()); scene.add(rock); } }
 // ---- THE ASHFIELDS: a second region past the ridge — Kel's country, where the raiders come from ----
 const ash = new THREE.Mesh(new THREE.CircleGeometry(120, 32),
   new THREE.MeshStandardMaterial({ color: 0x241611, roughness: 1 })); ash.rotation.x=-Math.PI/2; ash.position.set(10,0.02,-165); scene.add(ash);
@@ -209,7 +224,27 @@ for (const [id, s] of Object.entries(SITES)) {
   const grp = new THREE.Group(); grp.position.set(s.pos[0], 0, s.pos[2]); scene.add(grp); s.grp = grp;
   // landmark base
   if (id==='well'){ const ring=new THREE.Mesh(new THREE.CylinderGeometry(3,3,2,16), new THREE.MeshStandardMaterial({color:0x3f3f46})); ring.position.y=1; grp.add(ring); const water=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.2,0.3,16), new THREE.MeshStandardMaterial({color:0x3b82c4,emissive:0x0a2a44})); water.position.y=2; grp.add(water); s.water=water; }
-  else if (id==='village'){ for(let i=0;i<5;i++){const a=i/5*6.28; const hut=new THREE.Mesh(new THREE.BoxGeometry(3,3,3), new THREE.MeshStandardMaterial({color:0x2a2320})); hut.position.set(Math.cos(a)*5,1.5,Math.sin(a)*5); grp.add(hut); const roof=new THREE.Mesh(new THREE.ConeGeometry(2.6,2,4), new THREE.MeshStandardMaterial({color:0x3a2c22})); roof.position.set(Math.cos(a)*5,4,Math.sin(a)*5); roof.rotation.y=0.78; grp.add(roof);} }
+  else if (id==='village'){
+    const wallTex=(()=>{ const cv=document.createElement('canvas'); cv.width=64; cv.height=64; const x=cv.getContext('2d');
+      x.fillStyle='#2a2320'; x.fillRect(0,0,64,64); x.strokeStyle='rgba(0,0,0,0.35)'; x.lineWidth=2;
+      for(let p=8;p<64;p+=12){ x.beginPath(); x.moveTo(0,p); x.lineTo(64,p); x.stroke(); }   // plank seams
+      x.strokeStyle='rgba(94,74,52,0.25)'; for(let p=3;p<64;p+=6){ x.beginPath(); x.moveTo(0,p); x.lineTo(64,p); x.stroke(); }
+      const t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t; })();
+    const thatchTex=(()=>{ const cv=document.createElement('canvas'); cv.width=64; cv.height=64; const x=cv.getContext('2d');
+      x.fillStyle='#3a2c22'; x.fillRect(0,0,64,64);
+      for(let i=0;i<220;i++){ x.strokeStyle=Math.random()<0.5?'rgba(66,50,34,0.6)':'rgba(28,20,14,0.5)'; x.lineWidth=1;
+        const px=Math.random()*64, py=Math.random()*64; x.beginPath(); x.moveTo(px,py); x.lineTo(px+Math.random()*2-1, py+4+Math.random()*5); x.stroke(); }   // hanging straw
+      const t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t; })();
+    for(let i=0;i<5;i++){const a=i/5*6.28;
+      const hut=new THREE.Mesh(new THREE.BoxGeometry(3,3,3), new THREE.MeshStandardMaterial({map:wallTex,roughness:1})); hut.position.set(Math.cos(a)*5,1.5,Math.sin(a)*5); grp.add(hut);
+      const roof=new THREE.Mesh(new THREE.ConeGeometry(2.9,2.4,4), new THREE.MeshStandardMaterial({map:thatchTex,roughness:1,flatShading:true})); roof.position.set(Math.cos(a)*5,4.2,Math.sin(a)*5); roof.rotation.y=0.78; grp.add(roof);
+      const door=new THREE.Mesh(new THREE.PlaneGeometry(0.9,1.7), new THREE.MeshStandardMaterial({color:0x17110c,roughness:1})); const da=a+Math.PI;   // doors face the village center
+      door.position.set(Math.cos(a)*5+Math.sin(da)*-1.52, 0.85, Math.sin(a)*5+Math.cos(da)*-1.52); door.rotation.y=da; grp.add(door);
+      const glowW=new THREE.Mesh(new THREE.PlaneGeometry(0.5,0.5), new THREE.MeshStandardMaterial({color:0x9a5a1e,emissive:0xd97416,emissiveIntensity:0.8}));   // a lamplit window
+      glowW.position.set(Math.cos(a)*5+Math.sin(da+1.7)*-1.52, 1.8, Math.sin(a)*5+Math.cos(da+1.7)*-1.52); glowW.rotation.y=da+1.7; grp.add(glowW);
+    }
+    const hearth=new THREE.PointLight(0xd97416, 0.9, 26); hearth.position.set(0,3,0); grp.add(hearth);   // warm village heart against the dusk
+  }
   else if (id==='fields'){ for(let i=0;i<4;i++){const f=new THREE.Mesh(new THREE.BoxGeometry(3,0.4,7), new THREE.MeshStandardMaterial({color:0x3f6b2a})); f.position.set(-6+i*4,0.2,0); grp.add(f);} s.fieldGrp=grp; }
   else if (id==='wall'){ for(let i=0;i<8;i++){const p=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,4), new THREE.MeshStandardMaterial({color:0x5b4636})); p.position.set(-7+i*2,2,0); grp.add(p);} }
   else if (id==='ridge'){ s.fireGrp=new THREE.Group(); grp.add(s.fireGrp); }
@@ -467,12 +502,23 @@ function updateParty(dt){
   });
 }
 
-// ---- western forest (instanced-ish cones) ----
-for (let i=0;i<40;i++){
-  const t = new THREE.Mesh(new THREE.ConeGeometry(1.6+Math.random(), 5+Math.random()*3, 6), new THREE.MeshStandardMaterial({color:0x16281a, roughness:1}));
-  t.position.set(-95+Math.random()*30, 3, 20+Math.random()*70); scene.add(t);
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,2), new THREE.MeshStandardMaterial({color:0x2a1c12})); trunk.position.set(t.position.x,1,t.position.z); scene.add(trunk);
+// ---- trees: a trunk + two stacked, color-jittered foliage tiers reads as a fir, not a traffic cone ----
+function plantTree(x, z, s=1){
+  const g=new THREE.Group();
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.26*s,0.38*s,2.6*s,6), new THREE.MeshStandardMaterial({color:0x2a1c12,roughness:1}));
+  trunk.position.y=1.3*s; g.add(trunk);
+  const shade=0x122016 + (Math.floor(Math.random()*3)*0x040804);   // per-tree green jitter
+  const lo=new THREE.Mesh(new THREE.ConeGeometry((1.9+Math.random()*0.7)*s, 3.6*s, 7), new THREE.MeshStandardMaterial({color:shade,roughness:1,flatShading:true}));
+  lo.position.y=3.4*s; g.add(lo);
+  const hi=new THREE.Mesh(new THREE.ConeGeometry((1.2+Math.random()*0.4)*s, 2.6*s, 7), new THREE.MeshStandardMaterial({color:shade+0x030603,roughness:1,flatShading:true}));
+  hi.position.y=5.3*s; g.add(hi);
+  g.position.set(x,0,z); g.rotation.y=Math.random()*6.28; scene.add(g); return g;
 }
+// western forest
+for (let i=0;i<40;i++) plantTree(-95+Math.random()*30, 20+Math.random()*70, 0.9+Math.random()*0.5);
+// scattered vale trees — kept to the margins so they never block the site-to-site walking lanes
+for (const [tx,tz] of [[-20,60],[-32,55],[30,55],[42,48],[55,60],[-15,-30],[-28,-42],[60,-20],[68,-32],[75,10],[-45,-15],[24,30]])
+  plantTree(tx+Math.random()*4-2, tz+Math.random()*4-2, 0.8+Math.random()*0.5);
 
 // ---- dusk sky dome ----
 const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.ShaderMaterial({
@@ -1284,7 +1330,7 @@ function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
   const tierC = relicId ? TIER_COLOR[RELICS[relicId].tier] : null;
   const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:(tierC?parseInt(tierC.slice(1),16):0xa78bfa), emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
   const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind, relicId }); }
-function heroAttack(){ if(w.over) return; AUDIO.sfx.attack(); swingT=0.22; let best=null,bd=1e9;
+function heroAttack(){ if(w.over || showStatus || showChron || covenantOpen) return; AUDIO.sfx.attack(); swingT=0.22; let best=null,bd=1e9;   // no free hits through a frozen world
   for(const e of enemies){ if(e.hp<=0||e.dying)continue; const d=hero.position.distanceTo(e.mesh.position); if(d<9&&d<bd){bd=d;best=e;} }
   if(best){ const {dmg,crit}=rollDamage(heroDmg*(fury>0?furyMult:1)); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg, crit);
     if(crit && relicHas('critSlow')) best.slow=Math.max(best.slow,2.5);
@@ -1350,7 +1396,7 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
   if(['1','2','3','4'].includes(k)){ if(covenantOpen) chooseCovenant(+k-1); else if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
   if(k==='x'&&w.over) restart();                 // (R is a power key now)
 });
-function dodge(){ if(dodgeCd>0||w.over||!started) return; dodgeCd=1.0; dodgeT=0.2; invuln=Math.max(invuln,0.35);
+function dodge(){ if(dodgeCd>0||w.over||!started||showStatus||showChron||covenantOpen) return; dodgeCd=1.0; dodgeT=0.2; invuln=Math.max(invuln,0.35);
   dodgeDir.set(Math.sin(hero.rotation.y),0,Math.cos(hero.rotation.y)); AUDIO.sfx.attack(); }
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
@@ -1452,8 +1498,9 @@ function animate(){
   if(contextLost) return;                                             // the recovery screen owns #ui now — don't overwrite it
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  const paused = covenantOpen || showStatus || showChron;              // menus freeze the world — you can't be killed while reading the chronicle
   // real-time flow: time passes and the gods act on their own — no turns taken (paused until you choose a calling)
-  if(started && !w.over && !covenantOpen){                             // covenant modal freezes the world, like the calling screen
+  if(started && !w.over && !paused){
     dayT += dt;
     if(dayT >= DAY_SECS){ dayT = 0; upkeepTick(w); day++; w.turn = day;
       while(npcPeril.length && w.village.pop<=npcPeril[0]){ npcPeril.shift(); killNPC(); }   // the vale empties, and takes its folk
@@ -1468,8 +1515,8 @@ function animate(){
   // move (world-relative)
   const _heroPrevX=hero.position.x, _heroPrevZ=hero.position.z;
   if(dodgeCd>0) dodgeCd-=dt;
-  if(dodgeT>0 && started && !w.over){ dodgeT-=dt; hero.position.x+=dodgeDir.x*62*dt; hero.position.z+=dodgeDir.z*62*dt; }
-  else if(started && !busy && !w.over){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));
+  if(dodgeT>0 && started && !w.over && !paused){ dodgeT-=dt; hero.position.x+=dodgeDir.x*62*dt; hero.position.z+=dodgeDir.z*62*dt; }
+  else if(started && !busy && !w.over && !paused){ let dx=0,dz=0; const spd=26*Math.max(0.4,1+relicSum('movePct'));
     if(keys.has('w')||keys.has('arrowup'))dz--; if(keys.has('s')||keys.has('arrowdown'))dz++;
     if(keys.has('a')||keys.has('arrowleft'))dx--; if(keys.has('d')||keys.has('arrowright'))dx++;
     if(dx||dz){ moveTarget=null; attackTarget=null; const m=Math.hypot(dx,dz); hero.position.x+=dx/m*spd*dt; hero.position.z+=dz/m*spd*dt; hero.rotation.y=Math.atan2(dx,dz); }   // WASD overrides click
@@ -1493,7 +1540,7 @@ function animate(){
   if(!seenAshfields && hero.position.z<-105){ seenAshfields=true; banner={t:'The Ashfields', brief:"You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps."}; bannerT=6; }
   if(npcMenu && (!npcMenu.alive || Math.hypot(hero.position.x-npcMenu.mesh.position.x,hero.position.z-npcMenu.mesh.position.z)>(npcMenu.ally?15:13))) npcMenu=null;   // walk away ends the talk
   if(marker && marker.visible){ marker.userData.t-=dt*0.8; marker.rotation.z+=dt*2.5; marker.material.opacity=Math.max(0,marker.userData.t); if(marker.userData.t<=0) marker.visible=false; }
-  if(started && !w.over && !covenantOpen) updateCombat(dt);           // freeze combat under the covenant modal
+  if(started && !w.over && !paused) updateCombat(dt);                 // combat freezes under any modal too
   if(started && !w.over) storyTick();                                 // advance the emergent campaign
   if(started && !w.over){ saveTimer+=dt; if(saveTimer>6){ saveTimer=0; saveGame(); } }   // autosave every ~6s of play
   if(bannerT>0) bannerT-=dt;                                          // title card fades
