@@ -414,6 +414,28 @@ const NPCS = [
             result:'"Most people ask anyway." A faint, real smile. "Thank you for the exception."' },
         ] },
     ] },
+  { id:'harl', name:'Harl', role:'the deserter', god:'kel', color:0xd08770, pos:[-8,0,-128],   // the Ashfields' only living soul — found past the ridge, not in the vale
+    quest:{ desc:"Put the dead fires to rest  [stand at Kel's warcamp]", kind:'rite' },
+    say:{ idle:"You crossed the ridge to find bones, and found me. I rode with the Wolf once. There's an oath of mine still smouldering in that camp south of here — stand at the dead fires and let it go out.",
+          active:'The fires are south, where the banners lean. Stand there, so the oath hears you.',
+          done:"It's quiet now. First quiet I've had since I threw down the spear. Thank you, stranger.",
+          crisis:'Kel is moving. I know the sound — get back over the ridge, or stand very still.',
+          kaineKnown:'So you\'ve crossed the Wolf and lived. He was the best of us, and the worst thing that ever happened to us.',
+          covenant:c=>c==='kel'?"So you gave Kel your hand. He'll hold it to something, one day — he always collects.":'Not Kel. Good. Whatever they promise up that ridge, it costs double.' },
+    topics:[
+      { id:'ash', label:'Ask what happened here', line:"This was pasture once, before the camps. We burned it ourselves — a warband eats a valley faster than any army it fights. When there was nothing left to burn, the Wolf pointed us at yours." },
+      { id:'kaine', label:'Ask about riding with Kaine', line:"He never slept the night before a raid. We thought it was nerves. It was arithmetic — he'd count what the burning would buy, and whether it was worth what it cost us. The night the count came out wrong, I left." },
+      { id:'self', label:'Ask why he stays in the ash',
+        line:"Because the vale won't have me, and the warband would have me back. Out here, nobody asks. I keep the graves — there are more of ours in this ash than you'd think.",
+        choices:[
+          { label:'"Come down to Aldermere. Ash is no home."', trust:2,
+            effect(n){ w.village.morale=Math.min(100,w.village.morale+2); },
+            result:'He looks south a long time. "Maybe. When the graves are kept — somebody has to know where they lie. After that, maybe."' },
+          { label:'"Keep them well. Someone should."', trust:2,
+            effect(n){ addPiety('kel',0.3); },
+            result:'"That\'s the first time anyone\'s called it work worth doing." He straightens a little. "Kel counts the dead too, you know. Someone ought to count them kindly."' },
+        ] },
+    ] },
 ];
 function makeNameplate(text, hex){
   const cv=document.createElement('canvas'); cv.width=256; cv.height=64; const x=cv.getContext('2d');
@@ -423,7 +445,7 @@ function makeNameplate(text, hex){
   spr.scale.set(8.5,2.1,1); spr.position.y=6.6; return spr;
 }
 function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
-const NPC_SKIN = { maren:'human_female', oda:'human_female', bran:'human_male', sela:'human_female' };
+const NPC_SKIN = { maren:'human_female', oda:'human_female', bran:'human_male', sela:'human_female', harl:'human_male' };
 // per-NPC silhouette: build (scale) + a headwear piece in their god's palette, so the four are
 // no longer the same model in four accent colors. Attached to the HEAD BONE with inverse-scale
 // compensation (same lesson as the hero's blade→hand), so it rides the idle/run animation.
@@ -432,6 +454,7 @@ const NPC_LOOK = {
   oda:  { scale:0.88, wear:'bun',   color:0x2e2015 },   // young mother: hair in a bun
   bran: { scale:1.02, wear:'cap',   color:0x5a2530 },   // watchman: an iron-banded cap, and the tallest build
   sela: { scale:0.95, wear:'hood',  color:0x4a3a6a },   // shrine-tender: a violet hood
+  harl: { scale:0.98, wear:'scarf', color:0x4a4238 },   // deserter: an ash-gray head wrap
 };
 function attachHeadwear(nc, look){
   const bone=nc.headBone(); if(!bone) return;
@@ -480,7 +503,7 @@ function pickChoice(n, tid, ci){ const t=(n.topics||[]).find(x=>x.id===tid); if(
 function completeNPC(n){ if(!n||n.state==='done') return; n.state='done'; addPiety(n.god,1); w.village.morale=Math.min(100,w.village.morale+6);
   toast=`${n.name} — ${t('charge fulfilled, the vale takes heart.')}`; toastT=3.5; if(npcMenu&&npcMenu.id===n.id) npcMenu=n; recruit(n); }   // fulfilled → joins your party
 function npcOf(kind){ return NPCS.find(n=>n.alive && n.state==='active' && n.quest.kind===kind); }
-function killNPC(){ const doomed=NPCS.filter(n=>n.alive); if(!doomed.length) return;
+function killNPC(){ const doomed=NPCS.filter(n=>n.alive && n.id!=='harl'); if(!doomed.length) return;   // the vale's collapse takes the vale's folk — the exile in the ash isn't among them
   doomed.sort((a,b)=> (a.state==='done'?1:0)-(b.state==='done'?1:0));   // the unhelped fall first
   const n=doomed[0]; n.alive=false; if(n.mesh&&n.mesh.parent) scene.remove(n.mesh); if(npcMenu&&npcMenu.id===n.id) npcMenu=null;
   const pi=party.indexOf(n); if(pi>=0) party.splice(pi,1);   // a fallen ally leaves the party
@@ -493,6 +516,7 @@ const ALLY = {
   oda:   { hp:65,  role:'mend',  cd:6.0 },   // Oss: heals the hero and the party
   bran:  { hp:130, role:'blade', cd:1.0, dmg:15 },   // Kel: wades in, melee
   sela:  { hp:75,  role:'smite', cd:3.2, dmg:24 },   // Ithra: judgement at range
+  harl:  { hp:110, role:'blade', cd:1.3, dmg:12 },   // an ex-soldier of the warband — fights, but the edge has gone off him
 };
 // allies scale with the HERO's level (same curve as enemy hp: *(1+level*0.1)) so they never fall
 // behind the fight they're helping you win — a static ally would become dead weight by lv8+.
@@ -851,6 +875,25 @@ const T = {
     "The Ashfields":"Les Champs de Cendre",
     "A Sign Made Real":"Un Signe Devenu Réel",
     "You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps.":"Vous franchissez la crête vers le pays de Kel — cendre, os, et la fumée froide des vieux camps.",
+    "the deserter":"le déserteur",
+    "Put the dead fires to rest  [stand at Kel's warcamp]":"Apaisez les feux éteints  [tenez-vous au camp de guerre de Kel]",
+    "You crossed the ridge to find bones, and found me. I rode with the Wolf once. There's an oath of mine still smouldering in that camp south of here — stand at the dead fires and let it go out.":"Vous avez franchi la crête pour trouver des ossements, et vous m'avez trouvé. J'ai chevauché avec le Loup, autrefois. Un serment à moi couve encore dans ce camp au sud — tenez-vous aux feux éteints et laissez-le s'éteindre.",
+    "The fires are south, where the banners lean. Stand there, so the oath hears you.":"Les feux sont au sud, là où penchent les bannières. Tenez-vous y, que le serment vous entende.",
+    "It's quiet now. First quiet I've had since I threw down the spear. Thank you, stranger.":"C'est calme, maintenant. Le premier calme depuis que j'ai jeté la lance. Merci, étranger.",
+    "Kel is moving. I know the sound — get back over the ridge, or stand very still.":"Kel se met en marche. Je connais ce bruit — repassez la crête, ou ne bougez plus du tout.",
+    "So you've crossed the Wolf and lived. He was the best of us, and the worst thing that ever happened to us.":"Alors vous avez croisé le Loup et survécu. Il était le meilleur d'entre nous, et la pire chose qui nous soit arrivée.",
+    "Ask what happened here":"Demander ce qui s'est passé ici",
+    "Ask about riding with Kaine":"L'interroger sur sa chevauchée avec Kaine",
+    "Ask why he stays in the ash":"Demander pourquoi il reste dans la cendre",
+    "\"Come down to Aldermere. Ash is no home.\"":"« Descendez à Aldremère. La cendre n'est pas un foyer. »",
+    "\"Keep them well. Someone should.\"":"« Gardez-les bien. Quelqu'un le doit. »",
+    "This was pasture once, before the camps. We burned it ourselves — a warband eats a valley faster than any army it fights. When there was nothing left to burn, the Wolf pointed us at yours.":"C'était un pâturage, avant les camps. Nous l'avons brûlé nous-mêmes — une bande de guerre dévore une vallée plus vite que n'importe quelle armée qu'elle combat. Quand il n'est plus rien resté à brûler, le Loup nous a pointés vers la vôtre.",
+    "He never slept the night before a raid. We thought it was nerves. It was arithmetic — he'd count what the burning would buy, and whether it was worth what it cost us. The night the count came out wrong, I left.":"Il ne dormait jamais la nuit avant un raid. Nous pensions que c'étaient les nerfs. C'était de l'arithmétique — il comptait ce que l'incendie rapporterait, et si cela valait ce que cela nous coûtait. La nuit où le compte est tombé faux, je suis parti.",
+    "Because the vale won't have me, and the warband would have me back. Out here, nobody asks. I keep the graves — there are more of ours in this ash than you'd think.":"Parce que le val ne veut pas de moi, et que la bande me reprendrait. Ici, personne ne demande rien. Je garde les tombes — il y a plus des nôtres dans cette cendre que vous ne croyez.",
+    "He looks south a long time. \"Maybe. When the graves are kept — somebody has to know where they lie. After that, maybe.\"":"Il regarde longtemps vers le sud. « Peut-être. Quand les tombes seront gardées — quelqu'un doit savoir où elles reposent. Après cela, peut-être. »",
+    "\"That's the first time anyone's called it work worth doing.\" He straightens a little. \"Kel counts the dead too, you know. Someone ought to count them kindly.\"":"« C'est la première fois qu'on appelle cela un travail qui vaut la peine. » Il se redresse un peu. « Kel compte les morts aussi, vous savez. Quelqu'un devrait les compter avec bonté. »",
+    "So you gave Kel your hand. He'll hold it to something, one day — he always collects.":"Alors vous avez donné votre main à Kel. Il la tiendra à quelque chose, un jour — il finit toujours par encaisser.",
+    "Not Kel. Good. Whatever they promise up that ridge, it costs double.":"Pas Kel. Bien. Quoi qu'ils promettent là-haut sur la crête, cela coûte le double.",
   },
   zh: {
     'THEODICY':'神義論',
@@ -1117,6 +1160,25 @@ const T = {
     "The Ashfields":"灰燼之地",
     "A Sign Made Real":"徵兆成真",
     "You cross past the ridge into Kel's country — ash, bone, and the cold smoke of old camps.":"你越過山脊，踏入凱爾的疆土——灰燼、白骨，與舊營地的冷煙。",
+    "the deserter":"逃兵",
+    "Put the dead fires to rest  [stand at Kel's warcamp]":"讓死火安息  [立於凱爾的戰營]",
+    "You crossed the ridge to find bones, and found me. I rode with the Wolf once. There's an oath of mine still smouldering in that camp south of here — stand at the dead fires and let it go out.":"你越過山脊，本想尋見白骨，卻找到了我。我曾與狼同行。我有一道誓言仍在南邊那座營地裡悶燒——去立於死火之前，讓它熄滅吧。",
+    "The fires are south, where the banners lean. Stand there, so the oath hears you.":"營火在南邊，戰旗傾斜之處。站在那裡，好讓誓言聽見你。",
+    "It's quiet now. First quiet I've had since I threw down the spear. Thank you, stranger.":"現在安靜了。這是我擲下長矛以來的第一份安靜。謝謝你，陌生人。",
+    "Kel is moving. I know the sound — get back over the ridge, or stand very still.":"凱爾動身了。我認得那聲音——退回山脊那頭去，或者站著一動也不要動。",
+    "So you've crossed the Wolf and lived. He was the best of us, and the worst thing that ever happened to us.":"這麼說你與狼交過手，還活著。他曾是我們之中最好的人，也是我們遭遇過最壞的事。",
+    "Ask what happened here":"詢問這裡發生過什麼",
+    "Ask about riding with Kaine":"詢問他與凱恩同行的往事",
+    "Ask why he stays in the ash":"詢問他為何留在灰燼中",
+    "\"Come down to Aldermere. Ash is no home.\"":"「下山來亞德莫爾吧。灰燼不是家。」",
+    "\"Keep them well. Someone should.\"":"「好好守著他們。總得有人守。」",
+    "This was pasture once, before the camps. We burned it ourselves — a warband eats a valley faster than any army it fights. When there was nothing left to burn, the Wolf pointed us at yours.":"在營地來之前，這裡曾是牧場。是我們親手燒掉的——一支戰團吞噬山谷的速度，比它對抗的任何軍隊都快。當再無一物可燒，狼便把我們指向了你們的山谷。",
+    "He never slept the night before a raid. We thought it was nerves. It was arithmetic — he'd count what the burning would buy, and whether it was worth what it cost us. The night the count came out wrong, I left.":"劫掠前夜他從不睡覺。我們以為那是緊張。其實是算術——他在計算焚燒能換來什麼，值不值得我們付出的代價。算式出錯的那一夜，我離開了。",
+    "Because the vale won't have me, and the warband would have me back. Out here, nobody asks. I keep the graves — there are more of ours in this ash than you'd think.":"因為幽谷容不下我，而戰團卻願意收回我。在這裡，沒有人過問。我守著墳墓——這片灰燼裡埋著的自己人，比你想的要多。",
+    "He looks south a long time. \"Maybe. When the graves are kept — somebody has to know where they lie. After that, maybe.\"":"他向南望了很久。「也許吧。等墳墓有人守了——總得有人知道他們躺在哪裡。在那之後，也許。」",
+    "\"That's the first time anyone's called it work worth doing.\" He straightens a little. \"Kel counts the dead too, you know. Someone ought to count them kindly.\"":"「這是頭一回有人說這是件值得做的事。」他的腰桿挺直了些。「你知道嗎，凱爾也數算死者。總該有人懷著善意去數。」",
+    "So you gave Kel your hand. He'll hold it to something, one day — he always collects.":"這麼說你把手交給了凱爾。總有一天他會拿它抵債——他向來有債必收。",
+    "Not Kel. Good. Whatever they promise up that ridge, it costs double.":"不是凱爾。很好。無論山脊上的他們許諾什麼，代價都要翻倍。",
   },
 };
 // ---- minimap: a small DOM overlay, world (x,z) -> panel pixels. No second camera/render pass. ----
@@ -1451,7 +1513,7 @@ function chooseOffer(i){ shrineMenu=false; doAct({action:'offer', deity:DEITY_ID
 function doAct(a){ shrineMenu=false; applyPlayerAction(w, a.action, a.deity);   // instant — no turn taken
   if(a.action==='tend_well'){ addPiety('vurm',0.5); if(crisis&&crisis.kind==='well') resolveCrisis(); completeNPC(npcOf('well')); }
   else if(a.action==='harvest'){ if(crisis&&crisis.kind==='fields') resolveCrisis(); else addPiety('vurm',0.3); }
-  else if(a.action==='fortify'){ if(a.warcamp) addPiety('kel',0.5); else if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
+  else if(a.action==='fortify'){ if(a.warcamp){ addPiety('kel',0.5); completeNPC(npcOf('rite')); } else if(crisis&&crisis.kind==='wall') resolveCrisis(); else addPiety('kel',0.3); }
   else if(a.action==='rest'){ addPiety('oss',0.4); completeNPC(npcOf('mercy')); }
   else if(a.action==='pay_debt'){ if(crisis&&crisis.kind==='debt') resolveCrisis(); else addPiety('ithra',0.6); toast=t('A debt is settled — Ithra marks the ledger even.'); toastT=2.5; }
   else if(a.action==='desecrate'){ toast=t('The shrine comes apart under your hands. Every god remembers this.'); toastT=4; fx3('#7a1f1f'); } }
