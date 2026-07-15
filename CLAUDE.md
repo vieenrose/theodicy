@@ -57,17 +57,33 @@ real bug (`desecrate` pushed tension to 126, unclamped when no god acted). It ea
 Done and green:
 
 - `game/engine.js` — deterministic world, rules, arbiter, ledger. The model never touches truth.
-- `game/gods.js` — `HeuristicGod` (baseline, zero download) + `SupraGod` (transformers.js/WebGPU).
+- `game/gods.js` — `HeuristicGod` (baseline, zero download) + `SupraGod` (transformers.js/WebGPU)
+  + `InstructGod` (tiered in-browser instruct LLM: Qwen3-0.6B chooses+speaks on WebGPU,
+  SmolLM2-360M voice-only on WASM; speaks the UI language, with a language gate on garble).
 - `game/index.html` — React + Tailwind, no build step (esm.sh + htm). Playable now.
+- `game/world3d.html` — the flagship: a Three.js ARPG over the same engine. Rigged CC0 character
+  models (`game/models/`, Kenney), 5 named NPCs with branching dialogue + trust, the Kaine
+  antagonist arc with a peace ending earned through Harl's charge, full EN/FR/zh-TW i18n
+  (text-as-key `t()`; keys are extracted programmatically — never retyped), touch controls,
+  save/load. Live at `luigi-theodicy.static.hf.space/game/world3d.html` (HF Space `Luigi/theodicy`).
 - `train/` — corpus gen, full SFT of Supra-50M-Base, ONNX q4 export. Sized for the 3060.
-- Tests pass: 3934 divine acts, 33.3% mercy rate, longest escalation run 3.
+- `test/eval_god.mjs` — WRITTEN (despite item 2 below in older copies of this brief), with a GPU
+  score-worker for trained checkpoints. Reference frame at 200 games:
+  heuristic KL 0.208 / MI 0.466 · oracle-argmax KL 0.685 / MI 0.714 · random KL 0.566 / MI 0.104.
+- Tests pass: 3934 divine acts, 33.3% mercy rate, longest escalation run 3 (re-verified July 2026).
 
 Open:
 
-1. **The training run.** Luigi launched it on the 3060. Ask for the loss curve and the SFT sanity
-   probe. The probe must print something like `kel:raid`. If it prints prose, the format didn't
-   take — raise `--epochs` to 5.
-2. **`test/eval_god.mjs` does not exist yet.** It is the most important unwritten file. See below.
+1. **The first training run FINISHED and FAILED the eval the way the brief predicted.**
+   `ckpt/supra-god` on the 3060: sanity probe clean (`kel:arm`, `oss:respite` — format took), but
+   at 200 games the deployed model scored **KL 0.107 / MI 0.414** — BELOW the heuristic's KL floor.
+   It became the oracle, more faithfully than the oracle's own samples. Verdict rule one: delete
+   the model. The prescribed remedy is underway: retrain on `data/god_bids_teacher.jsonl` (5k
+   teacher-labelled rows, already on the machine) → `ckpt/supra-god-teacher`, then re-run
+   `node test/eval_god.mjs --ckpt ckpt/supra-god-teacher`. NOTE: the hub `SupraLabs/Supra-50M-Base`
+   repo now ships a transformers-v5 tokenizer config that breaks v4 installs — train with
+   `--base models/supra-base-local` (snapshot on the 3060).
+2. ~~`test/eval_god.mjs` does not exist yet.~~ It exists. See above.
 3. **A pending judgment call:** the README leads with the Supra-50M critique, quoting its worst
    outputs, because that failure *is* the design rationale. Luigi hasn't decided whether to soften
    it. Don't change it unilaterally.
