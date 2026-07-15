@@ -76,7 +76,11 @@ export class HeuristicGod {
 // local path served over HTTP.
 // ---------------------------------------------------------------------------
 export class SupraGod {
-  constructor(modelId = 'SupraLabs/Supra-50M-Base-ONNX', opts = {}) {
+  // Default is the MIX fine-tune (20k oracle + 5k teacher rows), the checkpoint the eval
+  // crowned (July 2026, 150 games): argmax KL 0.887 vs oracle / MI 0.265 / H 0.917 — reads
+  // the valley, then disagrees. Served SAME-ORIGIN from the Space (game/models/), loaded via
+  // transformers.js localModelPath — no hub repo needed. The base model was never the intent.
+  constructor(modelId = 'supra-god-mix-onnx', opts = {}) {
     this.modelId = modelId;
     this.name = 'Supra-50M';
     this.ready = false;
@@ -87,9 +91,16 @@ export class SupraGod {
   }
 
   async load(onProgress) {
-    const { AutoTokenizer, AutoModelForCausalLM } = await import(
+    const TF = await import(
       'https://esm.sh/@huggingface/transformers@3.7.5'   // esm.sh: the CDN the static Space's CSP allows
     );
+    const { AutoTokenizer, AutoModelForCausalLM, env } = TF;
+    if (!this.modelId.includes('/')) {                   // bare id → our same-origin copy under ./models/
+      env.allowLocalModels = true;
+      env.localModelPath = new URL('./models/', import.meta.url).href;   // relative to gods.js, NOT the page — pages live at several depths
+      // NOTE: env is module-global — hub ids (InstructGod) still work because transformers.js
+      // falls through to the hub when the local fetch 404s (allowRemoteModels stays true).
+    }
     this.tok = await AutoTokenizer.from_pretrained(this.modelId);
     this.model = await AutoModelForCausalLM.from_pretrained(this.modelId, {
       dtype: this.dtype,
@@ -158,10 +169,11 @@ export class SupraGod {
       // so the god is always capricious-but-lawful.
       const prompt = this.#prompt(w);
       const inputs = await this.tok(prompt);
-      const out = await this.model.generate({
-        ...inputs, max_new_tokens: 8, do_sample: true, temperature: 1.0,
-        top_p: 0.95, repetition_penalty: 1.1,
-      });
+      // GREEDY, deliberately. The eval swept every sampling/blend config (July 2026): the 50M
+      // model's logit margins are so shallow that ANY softmax sampling collapses its choice to
+      // noise (b0/T0.7: MI 0.077 ≈ random), while argmax holds a real disposition (mix ckpt:
+      // KL 0.887 vs oracle, MI 0.265). The caprice comes from the world varying, not the dice.
+      const out = await this.model.generate({ ...inputs, max_new_tokens: 8, do_sample: false });
       const full = this.tok.batch_decode(out, { skip_special_tokens: true })[0];
       const tail = full.slice(prompt.length);
       const m = tail.match(/(vurm|kel|oss|ithra)\s*:\s*([a-z]+)/i);   // anchored to real deity ids — a stray "word:word" in prose can't false-match
@@ -204,6 +216,7 @@ export class SupraGod {
       const cut = text.lastIndexOf('.');
       if (cut > 12) text = text.slice(0, cut + 1);
       if (text.length < 12) throw new Error('too short');
+      if (/^\s*(vurm|kel|oss|ithra)\s*:\s*[a-z_]+/i.test(text)) throw new Error('format leak');   // the fine-tune loves its own training format — that's a bid, not a prophecy
       return text;
     } catch {
       return pick(OMENS[bid.verb], Math.random);

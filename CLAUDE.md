@@ -74,15 +74,30 @@ Done and green:
 
 Open:
 
-1. **The first training run FINISHED and FAILED the eval the way the brief predicted.**
-   `ckpt/supra-god` on the 3060: sanity probe clean (`kel:arm`, `oss:respite` — format took), but
-   at 200 games the deployed model scored **KL 0.107 / MI 0.414** — BELOW the heuristic's KL floor.
-   It became the oracle, more faithfully than the oracle's own samples. Verdict rule one: delete
-   the model. The prescribed remedy is underway: retrain on `data/god_bids_teacher.jsonl` (5k
-   teacher-labelled rows, already on the machine) → `ckpt/supra-god-teacher`, then re-run
-   `node test/eval_god.mjs --ckpt ckpt/supra-god-teacher`. NOTE: the hub `SupraLabs/Supra-50M-Base`
-   repo now ships a transformers-v5 tokenizer config that breaks v4 installs — train with
-   `--base models/supra-base-local` (snapshot on the 3060).
+1. **The training question is ANSWERED (July 2026). The god exists; it is `ckpt/supra-god-mix`,
+   and it must be deployed GREEDY.** The full experiment, so nobody re-runs it blind:
+   - v1 (`supra-god`, 20k oracle rows): probe clean, but deployed KL 0.107 / MI 0.414 — became
+     the oracle, more faithfully than the oracle's own samples. Verdict rule one.
+   - v2 (`supra-god-teacher`, 5k teacher rows): argmax has real taste (KL 0.444, Vurm-heavy,
+     Ithra-starved) but MI only 0.248 — the teacher itself is world-blind, and every SAMPLED
+     config destroys the taste anyway.
+   - The deployed blend was a confound: `lp + 1.6·anger-prior` at T 0.7 measures the PRIOR, not
+     the model. Swept blend {0,.5,1,1.6} × T {0.7,.35,.2}: the frontier bends AROUND the target
+     zone. 50M logit margins are too shallow to survive ANY softmax sampling (pure model at
+     T 0.7 ≈ random, MI 0.077); sharpening T amplifies the prior instead (larger margins).
+   - v3 (**`supra-god-mix`**, 20k oracle + 5k teacher, 3 epochs): argmax **KL 0.887 / MI 0.265 /
+     H 0.917**, spread Vurm 40 / Ithra 31 / Kel 20 / Oss 9 — the eval's own verdict line:
+     "THE GOD: reads the valley, then disagrees." A mercy-starved pantheon; invariants still
+     force respite structurally, so it's capricious-but-lawful by construction.
+   - **Deployment = greedy decode, NO anger blend, NO sampling.** The caprice comes from the
+     world varying, not the dice. `SupraGod` in gods.js now does exactly this, pointed at a
+     same-origin ONNX copy (`game/models/supra-god-mix-onnx/`, 52MB q4, served by the Space;
+     `*.onnx` is git-ignored — the Space carries the binary, the 3060 keeps the source ckpt).
+     Publishing it as a proper hub model repo is Luigi's call (name/visibility) — auto mode
+     correctly refused to create that public surface unprompted.
+   - Gotchas: hub `SupraLabs/Supra-50M-Base` now ships a transformers-v5 tokenizer config that
+     breaks v4 installs — train with `--base models/supra-base-local` (snapshot on the 3060).
+     And `pgrep -f` in remote one-liners matches its own command line — use `[b]racket` patterns.
 2. ~~`test/eval_god.mjs` does not exist yet.~~ It exists. See above.
 3. **A pending judgment call:** the README leads with the Supra-50M critique, quoting its worst
    outputs, because that failure *is* the design rationale. Luigi hasn't decided whether to soften

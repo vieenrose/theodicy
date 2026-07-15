@@ -104,7 +104,7 @@ function App() {
   const [loading, setLoading] = useState(null);
   const [thinking, setThinking] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
-  const [modelId, setModelId] = useState('Luigi/supra-god-onnx');
+  const [modelId, setModelId] = useState('supra-god-mix-onnx');   // bare id → same-origin ./models/ copy (the eval-crowned mix fine-tune)
   const [reads, setReads] = useState([]);        // {idx, guess, actual, correct}
   const [accused, setAccused] = useState(() => new Set());
   const [showIntro, setShowIntro] = useState(true);
