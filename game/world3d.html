@@ -269,11 +269,12 @@ for (const [id, s] of Object.entries(SITES)) {
 const hero = new THREE.Group();
 const _fbxLoader = new FBXLoader();
 function loadFBX(url){ return new Promise((res,rej)=>_fbxLoader.load(url,res,undefined,rej)); }
-const [_charBase, _idleFbx, _runFbx] = await Promise.all([
-  loadFBX('./models/character.fbx'), loadFBX('./models/anim_idle.fbx'), loadFBX('./models/anim_run.fbx'),
+const [_charBase, _idleFbx, _runFbx, _jumpFbx] = await Promise.all([
+  loadFBX('./models/character.fbx'), loadFBX('./models/anim_idle.fbx'), loadFBX('./models/anim_run.fbx'), loadFBX('./models/anim_jump.fbx'),
 ]);
 const IDLE_CLIP = _idleFbx.animations.find(a=>/idle/i.test(a.name));
 const RUN_CLIP = _runFbx.animations.find(a=>/run/i.test(a.name));
+const JUMP_CLIP = _jumpFbx.animations.find(a=>/jump/i.test(a.name));   // played during the dodge roll
 const CHAR_SCALE = 0.012;   // native FBX units → world units — TUNING: adjust after a visual check
 const _texLoader = new THREE.TextureLoader();
 const SKIN_TEX = {};
@@ -291,15 +292,19 @@ function makeCharacter(skinKey, tint){
   const mixer=new THREE.AnimationMixer(inner); _mixers.push(mixer);
   const idleAction=mixer.clipAction(IDLE_CLIP), runAction=mixer.clipAction(RUN_CLIP);
   idleAction.play(); runAction.play(); runAction.setEffectiveWeight(0);
+  const jumpAction=mixer.clipAction(JUMP_CLIP); jumpAction.setLoop(THREE.LoopOnce); jumpAction.clampWhenFinished=false;
   let current='idle';
   function setMoving(moving){
     const want=moving?'run':'idle'; if(want===current) return; current=want;
     const [activate,deactivate] = want==='run' ? [runAction,idleAction] : [idleAction,runAction];
     activate.reset().fadeIn(0.25); deactivate.fadeOut(0.25);
   }
+  function jump(){ jumpAction.reset().setEffectiveWeight(1).fadeIn(0.05).play(); jumpAction.fadeOut(0.45); }   // a one-shot layered over idle/run — fades itself back out
   let accent=null;
   if(tint!=null){ accent=new THREE.Mesh(new THREE.PlaneGeometry(0.4,0.55), new THREE.MeshStandardMaterial({color:tint,roughness:1,side:THREE.DoubleSide})); accent.position.set(0,3.55,-0.4); outer.add(accent); }   // -0.4: clear of the torso mesh so it doesn't z-fight (lesson from the hero's cloak)
-  return { group:outer, body:bodyMesh, mixer, setMoving, accent };
+  // bone lookup for accessory attachment (hair, hoods) — compensates the rig's baked-in scale
+  function headBone(){ let b=null; inner.traverse(o=>{ if(o.isBone && o.name==='Head') b=o; }); return b; }
+  return { group:outer, body:bodyMesh, mixer, setMoving, jump, accent, headBone };
 }
 const heroChar = makeCharacter('human_male', null);
 hero.add(heroChar.group);
@@ -419,10 +424,36 @@ function makeNameplate(text, hex){
 }
 function npcColorHex(c){ return '#'+c.toString(16).padStart(6,'0'); }
 const NPC_SKIN = { maren:'human_female', oda:'human_female', bran:'human_male', sela:'human_female' };
+// per-NPC silhouette: build (scale) + a headwear piece in their god's palette, so the four are
+// no longer the same model in four accent colors. Attached to the HEAD BONE with inverse-scale
+// compensation (same lesson as the hero's blade→hand), so it rides the idle/run animation.
+const NPC_LOOK = {
+  maren:{ scale:0.92, wear:'scarf', color:0x3a5a8c },   // well-keeper: a working headscarf, Vurm blue-gray
+  oda:  { scale:0.88, wear:'bun',   color:0x2e2015 },   // young mother: hair in a bun
+  bran: { scale:1.02, wear:'cap',   color:0x5a2530 },   // watchman: an iron-banded cap, and the tallest build
+  sela: { scale:0.95, wear:'hood',  color:0x4a3a6a },   // shrine-tender: a violet hood
+};
+function attachHeadwear(nc, look){
+  const bone=nc.headBone(); if(!bone) return;
+  const ws=new THREE.Vector3(); bone.getWorldScale(ws); const inv=1/ws.x;
+  let m;
+  if(look.wear==='scarf'){ m=new THREE.Mesh(new THREE.SphereGeometry(0.62,10,8,0,Math.PI*2,0,Math.PI*0.62), new THREE.MeshStandardMaterial({color:look.color,roughness:1})); }
+  else if(look.wear==='bun'){ m=new THREE.Group();
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(0.58,10,8,0,Math.PI*2,0,Math.PI*0.55), new THREE.MeshStandardMaterial({color:look.color,roughness:0.9})); m.add(cap);
+    const bun=new THREE.Mesh(new THREE.SphereGeometry(0.24,8,8), new THREE.MeshStandardMaterial({color:look.color,roughness:0.9})); bun.position.set(0,0.25,-0.5); m.add(bun); }
+  else if(look.wear==='cap'){ m=new THREE.Group();
+    const dome=new THREE.Mesh(new THREE.SphereGeometry(0.6,10,8,0,Math.PI*2,0,Math.PI*0.5), new THREE.MeshStandardMaterial({color:0x3a3f46,roughness:0.6,metalness:0.5})); m.add(dome);
+    const band=new THREE.Mesh(new THREE.TorusGeometry(0.56,0.07,6,14), new THREE.MeshStandardMaterial({color:look.color,roughness:0.8})); band.rotation.x=Math.PI/2; band.position.y=-0.08; m.add(band); }
+  else { m=new THREE.Mesh(new THREE.ConeGeometry(0.68,1.0,10), new THREE.MeshStandardMaterial({color:look.color,roughness:1})); m.position.y=0.35; }   // hood
+  const holder=new THREE.Group(); holder.add(m); holder.scale.setScalar(inv); holder.position.y=0.28*inv;   // bone-local units are pre-scale — 0.28 world units up from the head-bone origin (the neck) to the crown
+  bone.add(holder);
+}
 function buildNPC(n){
   const g=new THREE.Group();
   const nc = makeCharacter(NPC_SKIN[n.id]||'human_male', n.color);   // the god-color accent carries their identity now that the body itself is a natural skin tone
-  g.add(nc.group); g.scale.setScalar(0.92);
+  const look = NPC_LOOK[n.id]||{scale:0.92};
+  if(look.wear) attachHeadwear(nc, look);
+  g.add(nc.group); g.scale.setScalar(look.scale);
   g.add(makeNameplate(n.name, npcColorHex(n.color)));
   g.position.set(n.pos[0],0,n.pos[2]); scene.add(g);
   n.mesh=g; n.body=nc.body; n.char=nc; n.alive=true; n.state='idle'; n.talked=false; n.kills=0;
@@ -1348,13 +1379,16 @@ function updateCombat(dt){
   if(heroHp<heroMax && clear && !relicHas('noRegen')) heroHp=Math.min(heroMax,heroHp+7*dt);   // Kel's Fury Stone forbids the mercy of rest
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
-    if(!e.dying && e.isRival && e.fleeAt!=null && e.hp<=e.fleeAt){ e.dying=0.5; gainXp(Math.round(e.xpv*0.5)); rivalFlee(e); continue; }   // he always escapes — until his true form
+    if(!e.dying && e.isRival && e.fleeAt!=null && e.hp<=e.fleeAt){ e.dying=0.5; e.fleeing=true; gainXp(Math.round(e.xpv*0.5)); rivalFlee(e); continue; }   // he always escapes — until his true form
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
       if(e.crisisTag && e.crisisTag===crisis && !crisis.resolved){ crisis.pending=Math.max(0,(crisis.pending||0)-1); if(crisis.pending<=0) resolveCrisis(); }   // only THIS wave counts
       { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
       if(e.boss){ w.bandits.strength=Math.max(0,w.bandits.strength-4); w.tension=Math.max(0,w.tension-40); toast="Kel's champion falls — the ridge holds its breath."; toastT=3.5; dropLoot(e.mesh.position); dropLoot(e.mesh.position); if(trialOn) endGame(true, covenant); }   // final trial won
       else if(Math.random()<0.42) dropLoot(e.mesh.position); }
-    if(e.dying){ e.dying-=dt; e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt)); if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
+    if(e.dying){ e.dying-=dt;
+      if(e.mesh.userData.char && !e.fleeing){ const k=1-Math.max(0,e.dying)/0.45; e.mesh.rotation.x=-k*1.5; e.mesh.position.y=-k*0.4; }   // humanoids topple backward and settle
+      else e.mesh.scale.multiplyScalar(Math.max(0.01,1-3*dt));                                                              // wolves — and a FLEEING Kaine — shrink away instead of falling dead
+      if(e.dying<=0&&e.mesh.parent){ scene.remove(e.mesh); e.dead=true; } continue; }
     e.mesh.traverse(c=>{ if(c.isMesh) c.material.emissive.setHex(e.hit>0?0xffffff:(e.telegraph>0?0xff6a00:0x3a0d0d)); }); if(e.hit>0)e.hit-=dt; if(e.slow>0)e.slow-=dt;
     const dh=hero.position.distanceTo(e.mesh.position), tgt = dh<30 ? hero.position : vc;
     const dir=new THREE.Vector3(tgt.x-e.mesh.position.x,0,tgt.z-e.mesh.position.z), d=dir.length();
@@ -1398,7 +1432,7 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
   if(k==='x'&&w.over) restart();                 // (R is a power key now)
 });
 function dodge(){ if(dodgeCd>0||w.over||!started||showStatus||showChron||covenantOpen) return; dodgeCd=1.0; dodgeT=0.2; invuln=Math.max(invuln,0.35);
-  dodgeDir.set(Math.sin(hero.rotation.y),0,Math.cos(hero.rotation.y)); AUDIO.sfx.attack(); }
+  dodgeDir.set(Math.sin(hero.rotation.y),0,Math.cos(hero.rotation.y)); heroChar.jump(); AUDIO.sfx.attack(); }   // the rig's jump clip sells the roll
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
 function nearest(){ let best=null,bd=1e9; for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d;best={id,s};} } return best; }
