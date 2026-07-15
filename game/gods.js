@@ -246,6 +246,7 @@ export class InstructGod {
     // LANGUAGE gate, not just a garble gate: non-compliant output falls back to the canned omen,
     // which the UI translates. Better a translated proverb than English prophecy in a zh HUD.
     if (this.lang === 'zh') {
+      if (/[ぁ-ゟ゠-ヿ]/.test(text)) return true;        // kana → the model drifted into JAPANESE (Qwen3 does this; kanji alone would pass the CJK count)
       const cjk = (text.match(/[一-鿿]/g) || []).length;
       return cjk < 4 || cjk < text.length * 0.3;
     }
@@ -271,14 +272,25 @@ export class InstructGod {
 
   // decode only the GENERATED tokens (slicing by prompt string length cuts mid-word)
   async #gen(messages, maxTok, temp, rep) {
-    const prompt = this.tok.apply_chat_template(messages, { add_generation_prompt: true, tokenize: false });
+    // Qwen3 is a thinking model by default — <think> preamble would eat the whole token budget.
+    // Suppress it three ways (each harmless where unsupported): the template kwarg, the documented
+    // '/no_think' soft switch on the last user turn, and stripping any <think> block that leaks anyway.
+    const isThinker = /qwen3/i.test(this.modelId);
+    if (isThinker) {
+      messages = messages.map((m) => ({ ...m }));
+      const last = messages[messages.length - 1];
+      if (last.role === 'user') last.content += ' /no_think';
+    }
+    const prompt = this.tok.apply_chat_template(messages, { add_generation_prompt: true, tokenize: false, enable_thinking: false });
     const ids = this.tok(prompt);
     const inLen = ids.input_ids.dims[ids.input_ids.dims.length - 1];
     const out = await this.model.generate({
       ...ids, max_new_tokens: maxTok, do_sample: true, temperature: temp,
       top_p: 0.92, repetition_penalty: rep,
     });
-    return this.tok.decode(Array.from(out.tolist()[0]).slice(inLen), { skip_special_tokens: true }).trim();
+    let text = this.tok.decode(Array.from(out.tolist()[0]).slice(inLen), { skip_special_tokens: true }).trim();
+    text = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trim();
+    return text;
   }
 
   async decide(w, legal) {

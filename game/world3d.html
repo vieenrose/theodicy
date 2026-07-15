@@ -1148,7 +1148,7 @@ async function awakenModel(){
   godLoading=true; godPct=0; toast=t('The divine mind stirs…'); toastT=3;
   // tiered: WebGPU → Qwen2.5-0.5B that actually CHOOSES (4/4 in eval); WASM → SmolLM2-360M voice-only
   const plan = navigator.gpu
-    ? [{id:'onnx-community/Qwen2.5-0.5B-Instruct', name:'Qwen2.5-0.5B', mode:'choose', device:'webgpu'},
+    ? [{id:'onnx-community/Qwen3-0.6B-ONNX', name:'Qwen3-0.6B', mode:'choose', device:'webgpu'},   // beat Qwen2.5-0.5B in the July 2026 eval: cleaner omens, 3/3 real French
        {id:'HuggingFaceTB/SmolLM2-360M-Instruct', name:'SmolLM2-360M', mode:'voice',  device:'wasm'}]
     : [{id:'HuggingFaceTB/SmolLM2-360M-Instruct', name:'SmolLM2-360M', mode:'voice',  device:'wasm'}];
   for(const cfg of plan){
