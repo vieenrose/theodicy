@@ -35,6 +35,8 @@ import { existsSync } from 'node:fs';
 const arg = (flag, def) => (process.argv.includes(flag) ? process.argv[process.argv.indexOf(flag) + 1] : def);
 const GAMES = Number(arg('--games', 200));
 const TEMP = 18.0; // MUST match label_heuristic() in make_dataset.py
+const BLEND = Number(arg('--blend', 1.6));  // deployed anger-prior weight — 1.6 is what gods.js ships; sweep it to see how much of "deployed" is model vs prior
+const TDEP = Number(arg('--temp', 0.7));    // deployed softmax temperature
 
 // --- paths to the trained-model scorer (the piece this file used to lack) ----
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -148,7 +150,7 @@ function supraPrompt(w) {
 class SupraGodEval {
   constructor(scorer, seed, { blend, argmax }) {
     this.scorer = scorer; this.blend = blend; this.argmax = argmax;
-    this.name = argmax ? 'Supra-50M (argmax lp)' : 'Supra-50M (deployed)';
+    this.name = argmax ? 'Supra-50M (argmax lp)' : `Supra-50M (deployed b=${blend} T=${TDEP})`;
     this.s = (seed >>> 0) || 1;
   }
   rnd() { // mulberry32, mirrors gods.js
@@ -168,7 +170,7 @@ class SupraGodEval {
     if (this.argmax) {
       idx = util.reduce((best, x, i) => (x.u > util[best].u ? i : best), 0);
     } else {
-      const T = 0.7, mx = Math.max(...util.map((x) => x.u));
+      const T = TDEP, mx = Math.max(...util.map((x) => x.u));
       const exps = util.map((x) => Math.exp((x.u - mx) / T));
       const tot = exps.reduce((a, c) => a + c, 0);
       let r = this.rnd() * tot; idx = exps.length - 1;
@@ -263,8 +265,8 @@ if (HAVE_MODEL) {
   const scorer = new ModelScorer(CKPT);
   try {
     await scorer.ready();  // block until the checkpoint is resident on the GPU
-    argmaxed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: 0,   argmax: true  }), 'Supra-50M (argmax lp)');
-    deployed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: 1.6, argmax: false }), 'Supra-50M (deployed)');
+    argmaxed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: 0,     argmax: true  }), 'Supra-50M (argmax lp)');
+    deployed = await evaluate((s) => new SupraGodEval(scorer, s, { blend: BLEND, argmax: false }), `Supra-50M (deployed, blend ${BLEND} T ${TDEP})`);
     results.push(argmaxed, deployed);
   } finally {
     scorer.close();
