@@ -894,6 +894,10 @@ const T = {
     "\"That's the first time anyone's called it work worth doing.\" He straightens a little. \"Kel counts the dead too, you know. Someone ought to count them kindly.\"":"« C'est la première fois qu'on appelle cela un travail qui vaut la peine. » Il se redresse un peu. « Kel compte les morts aussi, vous savez. Quelqu'un devrait les compter avec bonté. »",
     "So you gave Kel your hand. He'll hold it to something, one day — he always collects.":"Alors vous avez donné votre main à Kel. Il la tiendra à quelque chose, un jour — il finit toujours par encaisser.",
     "Not Kel. Good. Whatever they promise up that ridge, it costs double.":"Pas Kel. Bien. Quoi qu'ils promettent là-haut sur la crête, cela coûte le double.",
+    "speak the deserter's count":"dire le compte du déserteur",
+    "The Count Comes Out Wrong":"Le Compte Tombe Faux",
+    "\"Harl keeps your graves, Kaine. He counted you among the living.\" The greatsword wavers — and lowers.":"« Harl garde vos tombes, Kaine. Il t'a compté parmi les vivants. » L'épée à deux mains vacille — puis s'abaisse.",
+    "You spoke the deserter's count, and the Wolf lowered his blade. He walked back into the ash — to keep the graves, with Harl.":"Vous avez dit le compte du déserteur, et le Loup a baissé sa lame. Il est retourné dans la cendre — garder les tombes, avec Harl.",
   },
   zh: {
     'THEODICY':'神義論',
@@ -1179,6 +1183,10 @@ const T = {
     "\"That's the first time anyone's called it work worth doing.\" He straightens a little. \"Kel counts the dead too, you know. Someone ought to count them kindly.\"":"「這是頭一回有人說這是件值得做的事。」他的腰桿挺直了些。「你知道嗎，凱爾也數算死者。總該有人懷著善意去數。」",
     "So you gave Kel your hand. He'll hold it to something, one day — he always collects.":"這麼說你把手交給了凱爾。總有一天他會拿它抵債——他向來有債必收。",
     "Not Kel. Good. Whatever they promise up that ridge, it costs double.":"不是凱爾。很好。無論山脊上的他們許諾什麼，代價都要翻倍。",
+    "speak the deserter's count":"說出逃兵的算式",
+    "The Count Comes Out Wrong":"算式出錯之時",
+    "\"Harl keeps your graves, Kaine. He counted you among the living.\" The greatsword wavers — and lowers.":"「哈爾守著你們的墳墓，凱恩。他把你算在生者之列。」巨劍顫了顫——然後垂了下去。",
+    "You spoke the deserter's count, and the Wolf lowered his blade. He walked back into the ash — to keep the graves, with Harl.":"你說出了逃兵的算式，狼垂下了他的刀。他走回灰燼之中——與哈爾一同，守著那些墳墓。",
   },
 };
 // ---- minimap: a small DOM overlay, world (x,z) -> panel pixels. No second camera/render pass. ----
@@ -1201,6 +1209,7 @@ const END_TEXT={
 // He appears twice and always escapes below a health floor (a JRPG staple: the villain who taunts and
 // flees), then returns a third time — at the covenant trial — as his true, unfleeing final form.
 let rival = { stage: 0 }, rivalMet = 0;
+let peaceEnd = false;                                    // the trial ended with words, not the blade — set by resolvePeace(), read by the ending coda
 const RIVAL_LINES = [
   null,
   { title:'The Ashen Wolf', brief:'"You bleed for a well? Kel bleeds for none." A rider watches from the ridge — then rides down to meet you.',
@@ -1212,6 +1221,10 @@ const RIVAL_LINES = [
 ];
 function rivalFlee(e){ const L=RIVAL_LINES[e.rivalStage]; rival.stage=Math.max(rival.stage,e.rivalStage); rivalMet++;
   toast=L.flee; toastT=4; addPiety('kel',0.5); }
+function resolvePeace(e){                                 // the other ending: Harl's count, spoken back to the man who taught it
+  e.dying=0.5; e.fleeing=true; peaceEnd=true; addPiety('oss',2);
+  banner={t:'The Count Comes Out Wrong', brief:'"Harl keeps your graves, Kaine. He counted you among the living." The greatsword wavers — and lowers.'}; bannerT=6;
+  endGame(true, covenant); }
 function spawnRivalEncounter(stage){ const T=ETYPES['kaine'+stage], rp=SITES.ridge.pos, hp=Math.round(T.hp*(1+level*0.1));
   const L=RIVAL_LINES[stage]; banner={t:L.title, brief:L.brief}; bannerT=5.5;
   enemies.push({ mesh:enemyMesh(rp[0],rp[2]+14,T), hp,maxHp:hp,dmg:T.dmg,spd:T.spd,r:T.r,xpv:T.xp, tname:T.name,
@@ -1442,6 +1455,8 @@ function updateCombat(dt){
   const vc=new THREE.Vector3(SITES.village.pos[0],0,SITES.village.pos[2]);
   for(const e of enemies){
     if(!e.dying && e.isRival && e.fleeAt!=null && e.hp<=e.fleeAt){ e.dying=0.5; e.fleeing=true; gainXp(Math.round(e.xpv*0.5)); rivalFlee(e); continue; }   // he always escapes — until his true form
+    if(trialOn && e.boss && !e.dying && !e.yieldable && e.hp<=e.maxHp*0.35){   // the deserter's gift: a kept grave-charge opens a second way to end the trial
+      const h=NPCS.find(n=>n.id==='harl'); if(h && h.alive && h.state==='done') e.yieldable=true; }
     if(!e.dying && e.hp<=0){ e.dying=0.45; gainXp(e.xpv); addPiety('kel', e.boss?2:0.25);   // Kel's respect is earned in blood
       if(e.crisisTag && e.crisisTag===crisis && !crisis.resolved){ crisis.pending=Math.max(0,(crisis.pending||0)-1); if(crisis.pending<=0) resolveCrisis(); }   // only THIS wave counts
       { const bn=npcOf('slay'); if(bn){ bn.kills++; if(bn.kills>=bn.quest.n) completeNPC(bn); } }   // Bran's charge: slay the raiders
@@ -1506,6 +1521,7 @@ function nearestThing(){ let best=null,bd=1e9;   // NPC, an ally at your side, o
 function interact(){ if(w.over||!started||covenantOpen) return;
   if(npcMenu){ npcMenu=null; return; }               // E closes an open conversation
   if(shrineMenu){ shrineMenu=false; return; }        // …and an open shrine (E used to just re-open it)
+  const yb=enemies.find(e=>e.yieldable&&!e.dying); if(yb && hero.position.distanceTo(yb.mesh.position)<12){ resolvePeace(yb); return; }
   const t=nearestThing(); if(!t) return;
   if(t.type==='npc'){ talkTo(t.npc); return; }
   if(t.s.shrine){ shrineMenu=true; return; } doAct(t.s.act); }
@@ -1527,7 +1543,7 @@ function restart(){
   enemies=[]; loot=[]; hits=[]; toast=''; toastT=0; heroHp=100; heroMax=100; heroDmg=16; level=1; xp=0; points=1; deaths=0; fury=0;
   mana=60; manaMax=60; powerRank={mend:1,flood:0,smite:0,fury:0}; furyMult=1.6; castCd={}; spawnT=4; invuln=0; showTree=false;
   baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
-  covenant=null; covenantOpen=false; endKind=null; trialOn=false;
+  covenant=null; covenantOpen=false; endKind=null; trialOn=false; peaceEnd=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
   npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh);
@@ -1797,7 +1813,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
    ${started&&!w.over?`<div class="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 pointer-events-none">${DEITY_IDS.map(d=>`<div><div class="mono text-[8px] mb-0.5 ${calling===d?'font-bold':''}" style="color:${GODC[d]}">${GNAME(d)}${calling===d?' ✦':''}</div><div class="w-2.5 h-16 rounded bg-stone-800 relative overflow-hidden"><div class="absolute bottom-0 w-full rounded" style="height:${piety[d]*10}%;background:${GODC[d]}"></div></div></div>`).join('')}</div>`:''}
    ${started&&!w.over&&party.length?`<div class="absolute bottom-24 left-4 flex flex-col gap-1.5 pointer-events-none"><div class="mono text-[8px] uppercase tracking-widest text-stone-500 mb-0.5">${t('your party')}</div>${party.map(n=>`<div class="flex items-center gap-2"><span class="mono text-[9px] w-16" style="color:${npcColorHex(n.color)}">${n.name} <span class="text-stone-600">Lv${n.level||level}</span></span><span class="inline-block w-20 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded" style="width:${Math.max(0,n.hp/n.maxHp*100)}%;background:${n.downed?'#57534e':npcColorHex(n.color)}"></span></span>${n.downed?'<span class="mono text-[8px] text-rose-400">down</span>':`<span class="mono text-[7px] text-stone-600">${ALLY[n.id].role}</span>`}</div>`).join('')}</div>`:''}
    ${bannerT>0&&banner?`<div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none" style="opacity:${Math.min(1,bannerT/1.5).toFixed(2)}"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${t(banner.t)}</p><p class="serif italic text-stone-100 text-2xl mt-1 px-6">${t(banner.brief)}</p></div>`:''}
-   ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div></div>`:''}
+   ${boss?`<div class="absolute top-8 left-1/2 -translate-x-1/2 text-center"><div class="mono text-[10px] text-rose-300 mb-0.5 uppercase tracking-widest">${boss.tname}</div><div class="w-64 h-2.5 rounded bg-stone-800 mx-auto overflow-hidden"><div class="h-full bg-rose-600" style="width:${Math.max(0,boss.hp)/boss.maxHp*100}%"></div></div>${boss.yieldable&&!boss.dying&&hero.position.distanceTo(boss.mesh.position)<12?`<button data-act="interact" class="pointer-events-auto mono text-[11px] mt-2 px-3 py-1.5 rounded-full border border-amber-600 bg-black/75 text-amber-300 animate-pulse">[E] ${t("speak the deserter's count")}</button>`:''}</div>`:''}
    ${foes>0&&!w.over?`<div class="absolute top-16 left-1/2 -translate-x-1/2 mono text-xs px-3 py-1 rounded-full bg-rose-950/70 border border-rose-900 text-rose-200">⚔ ${foes} ${t(foes>1?'foes in the vale':'foe in the vale')}</div>`:''}
    ${toastT>0?`<div class="absolute top-28 left-1/2 -translate-x-1/2 mono text-xs text-amber-200 bg-black/60 px-3 py-1 rounded border border-stone-800">${t(toast)}</div>`:''}
    ${invuln>0&&!w.over?`<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 serif italic text-rose-300 text-2xl">${t('You fell. You rise again at Aldermere.')}</div>`:''}
@@ -1835,7 +1851,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <p class="mono text-[10px] uppercase tracking-[0.35em] ${w.won?'text-amber-400':'text-rose-400'}">${t(w.won?'The Tale Is Told':'The Vale Falls')}</p>
      <p class="serif text-4xl mt-3 ${w.won?'text-emerald-300':'text-rose-300'}">${w.won&&endKind&&PANTHEON[endKind]?GNAME(endKind)+t("'s Vale"):t('The vale is empty.')}</p>
      <p class="serif italic text-stone-300 mt-3 leading-snug">${w.won?t(END_TEXT[endKind]||'The vale endures under your watch.'):t('Aldermere starved before you could name a god to save it.')}</p>
-     ${rival.stage>=3?`<p class="serif italic text-rose-200/90 text-[13px] mt-2 leading-snug">${t(rivalMet>=2?'You had crossed blades with Kaine twice before he stopped running. The third time, he did not.':rivalMet===1?'You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.':'A stranger called himself Kaine, and made his last stand where the ridge meets the vale.')}</p>`:''}
+     ${rival.stage>=3?`<p class="serif italic ${peaceEnd?'text-amber-200/90':'text-rose-200/90'} text-[13px] mt-2 leading-snug">${t(peaceEnd?'You spoke the deserter\'s count, and the Wolf lowered his blade. He walked back into the ash — to keep the graves, with Harl.':rivalMet>=2?'You had crossed blades with Kaine twice before he stopped running. The third time, he did not.':rivalMet===1?'You had met the Ashen Wolf once, and let him go. He did not return the courtesy — but this time, neither did you.':'A stranger called himself Kaine, and made his last stand where the ridge meets the vale.')}</p>`:''}
      <p class="serif italic text-[13px] mt-3 leading-snug">${NPCS.filter(x=>x.alive).length?`<span class="text-stone-400">${t('Still drawing breath:')}</span> <span class="text-emerald-300">${NPCS.filter(x=>x.alive).map(x=>x.name).join(', ')}</span>`:`<span class="text-rose-300">${t('None of the named folk survived.')}</span>`}${lostFolk.length?` <span class="text-stone-500">·</span> <span class="text-rose-400">${t('lost:')} ${lostFolk.join(', ')}</span>`:''}</p>
      <p class="mono text-[11px] text-stone-500 mt-3">Lv ${level} · ${t('fell')} ${deaths}× · ${day} ${t('days')} · ${t('read')} ${correct}/${reads.length} · ${NPCS.filter(x=>x.state==='done').length}/${NPCS.length} ${t('charges kept')}</p>
      <button data-act="restart" class="mt-5 mono text-sm px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t('begin anew')} ▸ (X)</button></div></div>`:''}`;
