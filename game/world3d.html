@@ -555,6 +555,7 @@ const GNAME=id=>t(PANTHEON[id].name.split(',')[0]);   // god names transliterate
 // screen, core HUD chrome, and the ending screen; crisis/dialogue text follows as a later pass —
 // there is simply a lot of it (today's NPC dialogue system alone added a large amount of new prose).
 let LANG = (localStorage.getItem('theodicy-lang')||'en');
+const TOUCH = matchMedia('(pointer:coarse)').matches;    // phone/tablet → on-screen combat buttons (tap-to-move already works)
 function setLang(l){ LANG=l; try{ localStorage.setItem('theodicy-lang', l); }catch(e){} if(god && god.setLang) god.setLang(l); }   // an awakened god switches tongue too
 function t(s){ return (LANG!=='en' && T[LANG] && T[LANG][s]) || s; }
 const T = {
@@ -1408,6 +1409,7 @@ function nearestThing(){ let best=null,bd=1e9;   // NPC, an ally at your side, o
   return best; }
 function interact(){ if(w.over||!started||covenantOpen) return;
   if(npcMenu){ npcMenu=null; return; }               // E closes an open conversation
+  if(shrineMenu){ shrineMenu=false; return; }        // …and an open shrine (E used to just re-open it)
   const t=nearestThing(); if(!t) return;
   if(t.type==='npc'){ talkTo(t.npc); return; }
   if(t.s.shrine){ shrineMenu=true; return; } doAct(t.s.act); }
@@ -1611,6 +1613,12 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'status') showStatus = !showStatus;
   else if (cmd === 'relicswap') resolveRelicOffer(+arg);
   else if (cmd === 'mute') AUDIO.toggleMute();
+  else if (cmd === 'strike') heroAttack();               // touch: on-screen combat buttons
+  else if (cmd === 'dodge') dodge();
+  else if (cmd === 'interact') interact();
+  else if (cmd === 'offer') chooseOffer(+arg);           // shrine options, tappable (were keyboard-only spans)
+  else if (cmd === 'desecrate') { if(shrineMenu && !w.sites.shrine.desecrated) doAct({action:'desecrate'}); }
+  else if (cmd === 'paydebt') { if(!w.over && w.debts.length) doAct({action:'pay_debt'}); }
 });
 function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=>r.correct).length;
   const hpPct=Math.max(0,heroHp)/heroMax*100, mnPct=mana/manaMax*100, xpPct=xp/xpNext()*100, foes=enemies.filter(e=>!e.dying).length;
@@ -1682,7 +1690,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
        <span class="mono text-xs">☺ ${v.pop} · 🌾 ${v.food} · 💧 ${v.water}</span>
        <span class="mono text-xs ${w.tension>65?'text-rose-400':'text-stone-500'}">${t('tension')} ${Math.round(w.tension)}</span>
        <span class="mono text-xs text-amber-300">${t('read')} ${correct}/${reads.length}</span>
-       ${w.debts.length?`<span class="mono text-xs text-violet-300" title="Ithra holds a debt against you">◈ ${t('debt')} ${w.debts.length} <span class="text-stone-500">[P]</span></span>`:''}
+       ${w.debts.length?`<button data-act="paydebt" class="pointer-events-auto mono text-xs text-violet-300" title="Ithra holds a debt against you — settle it">◈ ${t('debt')} ${w.debts.length} <span class="text-stone-500">[P]</span></button>`:''}
      </div>
      <span class="flex gap-3 items-center"><button data-act="mind" class="pointer-events-auto mono text-[10px] ${godBackend==='supra'?'text-violet-400':'text-stone-500'} hover:text-stone-200" title="the god's mind: heuristic oracle, or awaken an in-browser LLM">${godLoading?`◍ ${t('waking')} ${godName} ${godPct}%`:(godBackend==='supra'?`◈ ${godName}`:`◇ ${t('awaken mind')}`)}</button><button data-act="status" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="character sheet (I)">🜂</button><button data-act="chron" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="chronicle (K)">📜</button><button data-act="mute" class="pointer-events-auto mono text-xs text-stone-400 hover:text-stone-200" title="mute (M)">${AUDIO.muted()?'🔇':'♪'}</button><a href="./explore.html" class="pointer-events-auto mono text-[10px] text-stone-500 hover:text-stone-300 border-b border-stone-800">2D ▸</a></span>
    </div>
@@ -1701,14 +1709,18 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <button data-act="tree" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-amber-900 text-amber-300 hover:bg-amber-950/40 self-center">✦ ${t('Powers')}${points?` (${points})`:''}</button>
      <div class="flex gap-2">${skill}</div>
      <div class="flex flex-col items-center"><span class="mono text-[7px] text-stone-600 mb-1">${t('relics')}</span>${relicBar}</div>
-     <span class="mono text-[9px] text-stone-500 self-center leading-tight">${t('SPACE strike · SHIFT roll')}<br/>${t('I status · K chronicle')}</span>
+     ${TOUCH?'':`<span class="mono text-[9px] text-stone-500 self-center leading-tight">${t('SPACE strike · SHIFT roll')}<br/>${t('I status · K chronicle')}</span>`}
    </div>`:''}
    ${relicOffer?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="max-w-xl w-full px-6 text-center"><p class="mono text-[10px] uppercase tracking-[0.35em]" style="color:${TIER_COLOR[RELICS[relicOffer].tier]}">${t('a relic —')} ${RELICS[relicOffer].tier}</p><p class="serif text-3xl text-stone-100 mt-2">${RELICS[relicOffer].name}</p><p class="serif italic text-stone-400 mt-1 mb-5">${RELICS[relicOffer].desc}</p><p class="mono text-[10px] text-stone-500 mb-2">${t('your relics are full')} (${relicSlots}) — ${t('bind it in place of one, or leave it')}</p><div class="flex flex-wrap gap-2 justify-center">${relics.map((id,i)=>{const r=RELICS[id];return `<button data-act="relicswap:${i}" class="pointer-events-auto text-left w-48 p-2.5 rounded border hover:bg-stone-900" style="border-color:${TIER_COLOR[r.tier]}66"><div class="mono text-[10px]" style="color:${TIER_COLOR[r.tier]}">${r.name}</div><div class="mono text-[8px] text-stone-500">${r.desc}</div></button>`;}).join('')}</div><button data-act="relicswap:-1" class="pointer-events-auto mono text-xs mt-4 px-4 py-2 rounded border border-stone-700 text-stone-400 hover:bg-stone-900">${t('leave it behind')}</button></div></div>`:''}
    ${tree}
    ${statusPanel}
-   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm"><p class="serif text-lg text-violet-200 mb-2">${t('At the shrine…')}</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<span class="mono text-[11px] px-3 py-2 rounded border border-stone-700"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</span>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">${t('1–4 offer')}${w.debts.length?` · <span class="text-violet-300">${t('P settle a debt')}</span>`:''}</p>${!w.sites.shrine.desecrated?`<p class="mono text-[9px] text-rose-400 mt-2 leading-snug">${t("0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.")}</p>`:''}<p class="mono text-[9px] text-stone-600 mt-1">${t('E to leave')}</p></div>`:''}
+   ${shrineMenu?`<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-violet-900 bg-stone-950/95 rounded-lg p-4 text-center max-w-sm pointer-events-auto"><p class="serif text-lg text-violet-200 mb-2">${t('At the shrine…')}</p><div class="flex gap-2 justify-center flex-wrap">${DEITY_IDS.map((d,i)=>`<button data-act="offer:${i}" class="pointer-events-auto mono text-[11px] px-3 py-2 rounded border border-stone-700 hover:bg-stone-800"><b class="text-amber-300">${i+1}</b> ${GNAME(d)}</button>`).join('')}</div><p class="mono text-[9px] text-stone-600 mt-2">${t('1–4 offer')}${w.debts.length?` · <button data-act="paydebt" class="pointer-events-auto text-violet-300 border-b border-violet-800">${t('P settle a debt')}</button>`:''}</p>${!w.sites.shrine.desecrated?`<button data-act="desecrate" class="pointer-events-auto mono text-[9px] text-rose-400 mt-2 leading-snug text-left border border-rose-950 rounded p-1.5 hover:bg-rose-950/30">${t("0 — desecrate it: food & defense now, but every god's favor −25 and tension +15. Permanent.")}</button>`:''}<p class="mono text-[9px] text-stone-600 mt-1"><button data-act="interact" class="pointer-events-auto border-b border-stone-800">${t('E to leave')}</button></p></div>`:''}
    ${npcMenu&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 w-[30rem] max-w-[92vw] pointer-events-auto"><div class="border rounded-lg bg-stone-950/95 p-4" style="border-color:${npcColorHex(npcMenu.color)}66"><div class="flex items-center gap-3 mb-2"><div class="w-9 h-9 rounded-full grid place-items-center serif text-lg" style="background:${npcColorHex(npcMenu.color)}22;color:${npcColorHex(npcMenu.color)}">${npcMenu.name[0]}</div><div><div class="serif text-lg text-stone-100 leading-none">${npcMenu.name}</div><div class="mono text-[9px] text-stone-500">${t(npcMenu.role)}</div></div></div>${npcDialogue}${npcMenu.state==='active'?`<div class="mono text-[10px] text-amber-400 mt-2">◆ ${t(npcMenu.quest.desc)}${npcMenu.quest.kind==='slay'?` (${Math.min(npcMenu.kills,npcMenu.quest.n)}/${npcMenu.quest.n})`:''}</div>`:npcMenu.state==='done'?`<div class="mono text-[10px] text-emerald-400 mt-2">✓ ${t('their charge is fulfilled')}</div>`:''}<div class="mono text-[9px] text-stone-600 mt-2 text-right">[E] ${t('leave')}</div></div></div>`:''}
-   ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><span class="mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] ${t('speak with')} <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${t(near.npc.role)}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${t(near.s.label)} — <span class="text-stone-500">${t(near.s.name)}</span>`}</span></div>`:''}
+   ${!npcMenu&&!shrineMenu&&near&&!busy&&!w.over?`<div class="absolute left-1/2 bottom-24 -translate-x-1/2 text-center"><button data-act="interact" class="pointer-events-auto mono text-xs px-3 py-1.5 rounded-full bg-black/70 border border-stone-700 text-stone-200">${near.type==='npc'?`[E] ${t('speak with')} <span class="text-stone-100">${near.npc.name}</span> <span class="text-stone-500">· ${t(near.npc.role)}</span>${near.npc.state==='active'?' <span class="text-amber-400">◆</span>':near.npc.state==='done'?' <span class="text-emerald-400">✓</span>':''}`:`[E] ${t(near.s.label)} — <span class="text-stone-500">${t(near.s.name)}</span>`}</button></div>`:''}
+   ${TOUCH&&started&&!w.over&&!busy?`<div class="absolute right-3 bottom-4 flex flex-col gap-2 items-center">
+     <button data-act="dodge" class="pointer-events-auto w-14 h-14 rounded-full border border-stone-600 bg-black/60 text-stone-200 text-xl grid place-items-center active:bg-stone-800">↷</button>
+     <button data-act="strike" class="pointer-events-auto w-[4.5rem] h-[4.5rem] rounded-full border border-rose-800 bg-black/60 text-rose-200 text-3xl grid place-items-center active:bg-rose-950">⚔</button>
+   </div>`:''}
    ${!npcMenu&&!near&&!w.over&&day<3?`<div class="absolute left-1/2 bottom-28 -translate-x-1/2 mono text-[10px] text-stone-600">${t('seek the named folk of Aldermere')}</div>`:''}
    ${!started?`<div class="absolute inset-0 grid place-items-center bg-black/90 pointer-events-auto"><div class="text-center max-w-2xl px-6">
      <p class="serif text-5xl text-stone-100 tracking-[0.2em]">${t('THEODICY')}</p>
