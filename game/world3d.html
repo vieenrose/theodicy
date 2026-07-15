@@ -140,6 +140,8 @@ try {
   throw e;   // nothing past this point can run without a renderer — stop here, message is already painted
 }
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;   // filmic response — the cheapest step toward pre-rendered
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 renderer.domElement.tabIndex = 0;                        // focusable, so keys reach us even when embedded
 addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
@@ -178,6 +180,9 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 
 scene.add(new THREE.HemisphereLight(0x8899bb, 0x1a1410, 0.55));
 const key = new THREE.DirectionalLight(0xffd9a8, 1.0); key.position.set(-40, 60, 20); scene.add(key);
+key.castShadow = true; key.shadow.mapSize.set(1024,1024); key.shadow.bias = -0.0015;
+Object.assign(key.shadow.camera, { left:-70, right:70, top:70, bottom:-70, near:5, far:200 });
+scene.add(key.target);   // the light rig follows the hero each frame so the shadow box stays tight
 const ember = new THREE.PointLight(0xff5533, 0.0, 220); ember.position.set(30, 30, -60); scene.add(ember); // grows with tension
 
 // ground — a mottled moor texture (canvas noise), not a flat color plane
@@ -194,7 +199,7 @@ function groundTexture(){
 }
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
   new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 }));
-ground.rotation.x = -Math.PI/2; scene.add(ground);
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 // river (a flat ribbon)
 const river = new THREE.Mesh(new THREE.PlaneGeometry(220, 8),
   new THREE.MeshStandardMaterial({ color: 0x24557d, roughness: 0.4, metalness: 0.2 }));
@@ -292,7 +297,7 @@ function makeCharacter(skinKey, tint){
   inner.scale.setScalar(CHAR_SCALE);
   const outer = new THREE.Group(); outer.add(inner);
   let bodyMesh=null;
-  inner.traverse(o=>{ if(o.isMesh){ o.material=o.material.clone(); o.material.map=SKIN_TEX[skinKey]; o.material.color.setHex(0xffffff); o.material.roughness=0.85; o.material.metalness=0; o.material.emissive=new THREE.Color(0x000000); bodyMesh=o; } });
+  inner.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.material=o.material.clone(); o.material.map=SKIN_TEX[skinKey]; o.material.color.setHex(0xffffff); o.material.roughness=0.85; o.material.metalness=0; o.material.emissive=new THREE.Color(0x000000); bodyMesh=o; } });
   const mixer=new THREE.AnimationMixer(inner); _mixers.push(mixer);
   const idleAction=mixer.clipAction(IDLE_CLIP), runAction=mixer.clipAction(RUN_CLIP);
   idleAction.play(); runAction.play(); runAction.setEffectiveWeight(0);
@@ -621,6 +626,19 @@ const T = {
   fr: {
     "THE LAST RITE — the edge of death answers":"LE DERNIER RITE — le bord de la mort répond",
     "LIMIT":"LIMITE",
+    "play the Hand of Omens":"jouer à la Main des Présages",
+    "The Hand of Omens":"La Main des Présages",
+    "your move — pick a card, then a square":"à vous — choisissez une carte, puis une case",
+    "they ponder the omens…":"ils méditent les présages…",
+    "The hand is yours — the vale takes heart.":"La main est à vous — le val reprend courage.",
+    "The omens fall against you.":"Les présages tombent contre vous.",
+    "A drawn hand — the gods withhold judgement.":"Main nulle — les dieux retiennent leur jugement.",
+    "walk away":"s'en aller",
+    "concede":"abandonner",
+    "Raider":"Pillard",
+    "Ash Wolf":"Loup des Cendres",
+    "The Well":"Le Puits",
+    "The Shrine":"Le Sanctuaire",
     'THEODICY':'THÉODICÉE',
     'Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.':'Aldremère repose sous quatre dieux. Ils agissent sur elle, sans qu\'on les invoque ; vous endurez — et répondez.',
     'whom do you revere?':'qui révérez-vous ?',
@@ -909,6 +927,19 @@ const T = {
   zh: {
     "THE LAST RITE — the edge of death answers":"最後儀式——死亡邊緣的回應",
     "LIMIT":"極限",
+    "play the Hand of Omens":"來一局「預兆之手」",
+    "The Hand of Omens":"預兆之手",
+    "your move — pick a card, then a square":"輪到你——先選牌，再選格子",
+    "they ponder the omens…":"對方正在推敲預兆……",
+    "The hand is yours — the vale takes heart.":"這一局是你的——山谷為之振奮。",
+    "The omens fall against you.":"預兆對你不利。",
+    "A drawn hand — the gods withhold judgement.":"平局——諸神保留裁決。",
+    "walk away":"離開",
+    "concede":"認輸",
+    "Raider":"劫掠者",
+    "Ash Wolf":"燼灰之狼",
+    "The Well":"水井",
+    "The Shrine":"神龕",
     'THEODICY':'神義論',
     'Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.':'亞德莫爾受四位神明統轄。祂們未受召喚便對此地施為；你承受其果——並作出回應。',
     'whom do you revere?':'你敬奉何者？',
@@ -1487,7 +1518,7 @@ function dropLoot(pos){ const kind=Math.random()<0.6?'grain':'relic';
   const tierC = relicId ? TIER_COLOR[RELICS[relicId].tier] : null;
   const mat=new THREE.MeshStandardMaterial({ color:kind==='grain'?0xf59e0b:(tierC?parseInt(tierC.slice(1),16):0xa78bfa), emissive:kind==='grain'?0x3a2a0a:0x2a0a3a });
   const m=new THREE.Mesh(new THREE.OctahedronGeometry(1.1), mat); m.position.set(pos.x,1.5,pos.z); scene.add(m); loot.push({ mesh:m, kind, relicId }); }
-function heroAttack(){ if(w.over || showStatus || showChron || covenantOpen) return; AUDIO.sfx.attack(); swingT=0.22; let best=null,bd=1e9;   // no free hits through a frozen world
+function heroAttack(){ if(w.over || showStatus || showChron || covenantOpen || cardGame) return; AUDIO.sfx.attack(); swingT=0.22; let best=null,bd=1e9;   // no free hits through a frozen world
   for(const e of enemies){ if(e.hp<=0||e.dying)continue; const d=hero.position.distanceTo(e.mesh.position); if(d<9&&d<bd){bd=d;best=e;} }
   if(best){ const {dmg,crit}=rollDamage(heroDmg*(fury>0?furyMult:1)); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg, crit);
     if(crit && relicHas('critSlow')) best.slow=Math.max(best.slow,2.5);
@@ -1562,7 +1593,7 @@ addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); AUDIO.ensure();
   if(['1','2','3','4'].includes(k)){ if(covenantOpen) chooseCovenant(+k-1); else if(shrineMenu) chooseOffer(+k-1); else if(pending&&!pending.result) accuse(+k-1); }
   if(k==='x'&&w.over) restart();                 // (R is a power key now)
 });
-function dodge(){ if(dodgeCd>0||w.over||!started||showStatus||showChron||covenantOpen) return; dodgeCd=1.0; dodgeT=0.2; invuln=Math.max(invuln,0.35);
+function dodge(){ if(dodgeCd>0||w.over||!started||showStatus||showChron||covenantOpen||cardGame) return; dodgeCd=1.0; dodgeT=0.2; invuln=Math.max(invuln,0.35);
   dodgeDir.set(Math.sin(hero.rotation.y),0,Math.cos(hero.rotation.y)); heroChar.jump(); AUDIO.sfx.attack(); }   // the rig's jump clip sells the roll
 addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
@@ -1572,7 +1603,7 @@ function nearestThing(){ let best=null,bd=1e9;   // NPC, an ally at your side, o
     const d=Math.hypot(hero.position.x-n.mesh.position.x, hero.position.z-n.mesh.position.z); if(d<rad && d<bd){bd=d; best={type:'npc', npc:n};} }
   for(const [id,s] of Object.entries(SITES)){ const d=Math.hypot(hero.position.x-s.pos[0], hero.position.z-s.pos[2]); if(d<14 && d<bd){bd=d; best={type:'site', id, s};} }
   return best; }
-function interact(){ if(w.over||!started||covenantOpen) return;
+function interact(){ if(w.over||!started||covenantOpen||cardGame) return;
   if(npcMenu){ npcMenu=null; return; }               // E closes an open conversation
   if(shrineMenu){ shrineMenu=false; return; }        // …and an open shrine (E used to just re-open it)
   const yb=enemies.find(e=>e.yieldable&&!e.dying); if(yb && hero.position.distanceTo(yb.mesh.position)<12){ resolvePeace(yb); return; }
@@ -1599,7 +1630,7 @@ function restart(){
   baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false; peaceEnd=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
-  npcMenu=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
+  npcMenu=null; cardGame=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh);
     nn.trust=0; nn.asked=[]; nn._results={}; nn._topic=null; nn._aside=''; }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
@@ -1666,7 +1697,7 @@ function animate(){
   if(contextLost) return;                                             // the recovery screen owns #ui now — don't overwrite it
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
-  const paused = covenantOpen || showStatus || showChron;              // menus freeze the world — you can't be killed while reading the chronicle
+  const paused = covenantOpen || showStatus || showChron || !!cardGame;   // menus freeze the world — you can't be killed while reading the chronicle
   // real-time flow: time passes and the gods act on their own — no turns taken (paused until you choose a calling)
   if(started && !w.over && !paused){
     dayT += dt;
@@ -1718,6 +1749,7 @@ function animate(){
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
   // divine manifestations tick (particles/light/beam per active god-act)
   for(let i=manifests.length-1;i>=0;i--) if(!manifests[i].update(dt)) manifests.splice(i,1);
+  key.position.set(hero.position.x-40, 60, hero.position.z+20); key.target.position.copy(hero.position);
   // camera: cinematic orbit when the story earns it, else third-person follow
   if(cine){
     cine.t+=dt;                                          // runs on wall-time regardless of menus — it's short
@@ -1769,6 +1801,49 @@ function animate(){
   drawUI();
 }
 
+// ---- The Hand of Omens: a card duel over the vale's fates (Triple-Triad rules) ----
+// Cards carry four strengths [top,right,bottom,left]; placing beside a weaker facing side claims it.
+const CARD_POOL = [
+  {n:'Vurm',      g:'vurm',  s:[7,3,8,4]}, {n:'Kel',        g:'kel',   s:[9,5,2,6]},
+  {n:'Oss',       g:'oss',   s:[4,8,6,5]}, {n:'Ithra',      g:'ithra', s:[6,6,6,6]},
+  {n:'Raider',    g:'kel',   s:[5,4,3,2]}, {n:'Ash Wolf',   g:'kel',   s:[3,5,4,4]},
+  {n:'The Well',  g:'vurm',  s:[2,7,3,6]}, {n:'The Shrine', g:'ithra', s:[4,4,7,5]},
+  {n:'Bran',      g:'oss',   s:[6,3,5,4]}, {n:'Sela',       g:'vurm',  s:[3,6,4,5]},
+  {n:'Oda',       g:'oss',   s:[5,5,5,3]}, {n:'Kaine',      g:'kel',   s:[8,7,4,3]},
+];
+let cardGame=null;
+function draw5(){ const p=[...CARD_POOL], h=[]; for(let i=0;i<5;i++) h.push({...p.splice((Math.random()*p.length)|0,1)[0]}); return h; }
+function startCards(n){ cardGame={ opp:n, board:Array(9).fill(null), hand:draw5(), ohand:draw5(), sel:0,
+  turn:Math.random()<0.5?'you':'them', done:false, msg:'' }; npcMenu=null; if(cardGame.turn==='them') setTimeout(oppMove,700); }
+function cgFlips(board,i,card,owner){ const R=[[i>2?i-3:-1,0,2],[i%3<2?i+1:-1,1,3],[i<6?i+3:-1,2,0],[i%3>0?i-1:-1,3,1]], out=[];
+  for(const [j,a,b] of R){ if(j<0) continue; const c=board[j]; if(c&&c.owner!==owner&&card.s[a]>c.card.s[b]) out.push(j); } return out; }
+function cgPlace(i){ const g=cardGame; if(!g||g.done||g.turn!=='you'||g.board[i]||!g.hand.length) return;
+  const card=g.hand.splice(Math.min(g.sel,g.hand.length-1),1)[0]; g.sel=0;
+  for(const j of cgFlips(g.board,i,card,'you')) g.board[j].owner='you';
+  g.board[i]={card,owner:'you'}; AUDIO.sfx.pickup(); cgNext('them'); }
+function oppMove(){ const g=cardGame; if(!g||g.done||g.turn!=='them'||!g.ohand.length) return; let best=null;
+  for(let ci=0;ci<g.ohand.length;ci++) for(let i=0;i<9;i++){ if(g.board[i]) continue;
+    const f=cgFlips(g.board,i,g.ohand[ci],'them').length + Math.random()*0.4; if(!best||f>best.f) best={ci,i,f}; }
+  if(!best){ cgEnd(); return; } const card=g.ohand.splice(best.ci,1)[0];
+  for(const j of cgFlips(g.board,best.i,card,'them')) g.board[j].owner='them';
+  g.board[best.i]={card,owner:'them'}; AUDIO.sfx.hit(); cgNext('you'); }
+function cgScore(){ const g=cardGame; return { you: g.board.filter(c=>c&&c.owner==='you').length + g.hand.length,
+  them: g.board.filter(c=>c&&c.owner==='them').length + g.ohand.length }; }
+function cgNext(turn){ const g=cardGame; if(g.board.every(c=>c)){ cgEnd(); return; } g.turn=turn; if(turn==='them') setTimeout(oppMove,800); }
+function cgEnd(){ const g=cardGame; g.done=true; const s=cgScore();
+  if(s.you>s.them){ g.msg=t('The hand is yours — the vale takes heart.'); g.opp.trust=Math.min(10,(g.opp.trust||0)+2);
+    heroHp=heroMax; AUDIO.sfx.victory(); fx3('#fbbf24'); }
+  else if(s.you<s.them){ g.msg=t('The omens fall against you.'); AUDIO.sfx.death(); }
+  else g.msg=t('A drawn hand — the gods withhold judgement.'); }
+
+function cgCardHTML(c,owner){ const col = owner==='you' ? '#38bdf8' : '#f87171';
+  return `<div class="h-20 w-full rounded border relative grid place-items-center" style="border-color:${col}88;background:${col}14">
+    <span class="mono text-[8px] absolute top-0.5 inset-x-0 text-center text-stone-300">${c.s[0]}</span>
+    <span class="mono text-[8px] absolute right-1 top-1/2 -translate-y-1/2 text-stone-300">${c.s[1]}</span>
+    <span class="mono text-[8px] absolute bottom-0.5 inset-x-0 text-center text-stone-300">${c.s[2]}</span>
+    <span class="mono text-[8px] absolute left-1 top-1/2 -translate-y-1/2 text-stone-300">${c.s[3]}</span>
+    <span class="serif text-[10px] px-1 text-center leading-tight" style="color:${GODC[c.g]}">${t(c.n)}</span></div>`; }
+
 // ---- HUD (DOM) ----
 const ui=document.getElementById('ui');
 ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame innerHTML rebuilds
@@ -1797,6 +1872,10 @@ ui.addEventListener('pointerdown', (e) => {   // delegation: survives per-frame 
   else if (cmd === 'offer') chooseOffer(+arg);           // shrine options, tappable (were keyboard-only spans)
   else if (cmd === 'desecrate') { if(shrineMenu && !w.sites.shrine.desecrated) doAct({action:'desecrate'}); }
   else if (cmd === 'paydebt') { if(!w.over && w.debts.length) doAct({action:'pay_debt'}); }
+  else if (cmd === 'cards') { const n=NPCS.find(x=>x.id===arg); if(n&&n.alive) startCards(n); }
+  else if (cmd === 'cgsel') { if(cardGame&&!cardGame.done) cardGame.sel=+arg; }
+  else if (cmd === 'cgcell') cgPlace(+arg);
+  else if (cmd === 'cgquit') cardGame=null;
 });
 function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=>r.correct).length;
   const hpPct=Math.max(0,heroHp)/heroMax*100, mnPct=mana/manaMax*100, xpPct=xp/xpNext()*100, foes=enemies.filter(e=>!e.dying).length;
@@ -1831,7 +1910,8 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
       ${n._aside?`<p class="serif italic text-stone-400 text-[12px] mt-1.5 leading-snug">“${n._aside}”</p>`:''}
       ${showingChoices?`<div class="flex flex-col gap-1.5 mt-3">${top.choices.map((c,i)=>`<button data-act="choice:${n.id}|${top.id}|${i}" class="pointer-events-auto text-left mono text-[10px] px-2.5 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">${t(c.label)}</button>`).join('')}</div>`
         : (remaining.length?`<div class="flex flex-wrap gap-1.5 mt-3">${remaining.map(x=>`<button data-act="topic:${n.id}|${x.id}" class="pointer-events-auto mono text-[9px] px-2 py-1 rounded border border-stone-800 text-stone-500 hover:text-stone-200 hover:border-stone-600">${t(x.label)}</button>`).join('')}</div>`:'')}
-      ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">${t('their trust in you:')} ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}`;
+      ${n.trust>0?`<div class="mono text-[8px] text-stone-600 mt-2">${t('their trust in you:')} ${'♦'.repeat(Math.round(n.trust/2))}${'◇'.repeat(5-Math.round(n.trust/2))}</div>`:''}
+      <button data-act="cards:${n.id}" class="pointer-events-auto mono text-[9px] mt-2 px-2 py-1 rounded border border-stone-800 text-stone-500 hover:text-amber-300 hover:border-amber-900">◈ ${t('play the Hand of Omens')}</button>`;
   }
   const statusPanel = showStatus ? `<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="status"><div class="max-w-2xl w-full border border-stone-800 rounded-lg bg-stone-950 p-6 max-h-[85vh] overflow-auto" data-act="stop">
    <div class="flex justify-between items-baseline mb-4"><h2 class="serif text-2xl text-stone-100">${t('The Wayfarer')}</h2><span class="mono text-xs text-stone-500">${t('day')} ${day} · Lv ${level}</span></div>
@@ -1910,6 +1990,13 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <div class="flex flex-wrap gap-3 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="call:${d}" class="pointer-events-auto text-left w-52 p-3 rounded-lg border hover:bg-stone-900" style="border-color:${GODC[d]}66"><div class="mono text-xs mb-1" style="color:${GODC[d]}"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${POWERS[CALLINGS[d].power].name}</span></div><div class="serif italic text-[12px] text-stone-400 leading-snug">${t(CALLINGS[d].blurb)}</div></button>`).join('')}</div>
      <p class="mono text-[9px] text-stone-600 mt-6">${t('left-click move · SPACE strike · SHIFT roll · Q/R/F/V powers · E act · K chronicle')}</p>
      <button data-act="mind" class="pointer-events-auto mono text-[10px] mt-4 px-3 py-1.5 rounded border ${godBackend==='supra'?'border-violet-700 text-violet-300':'border-stone-700 text-stone-500 hover:text-stone-300'}">${godLoading?`◍ waking ${godName}… ${godPct}%`:(godBackend==='supra'?`◈ the divine mind is awake (${godName})`:'◇ awaken the divine mind — a real LLM becomes the god (Qwen2.5-0.5B on WebGPU, ~480MB; else SmolLM2-360M)')}</button>
+   </div></div>`:''}
+   ${cardGame?`<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-4"><div class="w-[26rem] max-w-[95vw]">
+     <div class="flex justify-between items-baseline"><h2 class="serif text-2xl text-stone-100">${t('The Hand of Omens')}</h2><span class="mono text-xs text-stone-500">vs ${cardGame.opp.name} · <span class="text-sky-300">${cgScore().you}</span>–<span class="text-rose-300">${cgScore().them}</span></span></div>
+     <p class="mono text-[9px] ${cardGame.done?'text-amber-300':'text-stone-600'} mt-1">${cardGame.done?cardGame.msg:(cardGame.turn==='you'?t('your move — pick a card, then a square'):t('they ponder the omens…'))}</p>
+     <div class="grid grid-cols-3 gap-1.5 my-3">${cardGame.board.map((c,i)=>c?cgCardHTML(c.card,c.owner):`<button data-act="cgcell:${i}" class="pointer-events-auto h-20 rounded border border-stone-800 hover:border-stone-500"></button>`).join('')}</div>
+     <div class="flex gap-1.5">${cardGame.hand.map((c,i)=>`<button data-act="cgsel:${i}" class="pointer-events-auto w-16 ${i===cardGame.sel?'ring-2 ring-amber-400 rounded':''}">${cgCardHTML(c,'you')}</button>`).join('')}</div>
+     <button data-act="cgquit" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t(cardGame.done?'walk away':'concede')} ▸</button>
    </div></div>`:''}
    ${covenantOpen&&!w.over?`<div class="absolute inset-0 grid place-items-center bg-black/85 pointer-events-auto"><div class="text-center max-w-xl px-6"><p class="mono text-[10px] uppercase tracking-[0.35em] text-amber-400">${t('The Covenant')}</p><p class="serif text-3xl text-stone-100 mt-3 mb-1">${t('You have proven devotion. Pledge.')}</p><p class="serif italic text-stone-500 mb-5">${t('Your patron grants their power — and their rival rises to test your oath.')}</p><div class="flex flex-wrap gap-2 justify-center">${DEITY_IDS.map((d,i)=>`<button data-act="cov:${i}" class="pointer-events-auto mono text-xs px-4 py-2.5 rounded border text-stone-200 hover:bg-stone-800" style="border-color:${GODC[d]}88"><b class="text-amber-300">${i+1}</b> ${GNAME(d)} <span class="text-stone-500">· ${t(POWERS[COV_POWER[d]].name)} · ${t('devotion')} ${piety[d].toFixed(1)}</span></button>`).join('')}</div></div></div>`:''}
    ${showChron&&started?`<div class="absolute inset-0 bg-black/85 grid place-items-center pointer-events-auto p-6" data-act="chron"><div class="max-w-lg w-full border border-stone-800 rounded-lg bg-stone-950 p-5 max-h-[80vh] overflow-auto" data-act="stop"><div class="flex justify-between items-baseline mb-3"><h2 class="serif text-2xl text-stone-100">${t('Chronicle of the Vale')}</h2><span class="mono text-[10px] text-stone-500">${t('day')} ${day}</span></div>${chronicle.length?chronicle.map(r=>`<div class="border-b border-stone-900 py-1.5"><span class="mono text-[9px] uppercase" style="color:${GODC[r.god]}">${GNAME(r.god)} · ${r.verb}</span>${r.crisis?`<span class="mono text-[8px] ml-2 ${r.done?'text-emerald-400':'text-rose-400'}">${t(r.done?'answered':'unanswered')}</span>`:''}<div class="serif italic text-[12px] text-stone-300">“${t(r.omen)||'—'}”</div></div>`).join(''):`<p class="serif italic text-stone-500">${t('The gods have not yet moved.')}</p>`}<button data-act="chron" class="mt-3 mono text-xs px-4 py-2 rounded border border-stone-600 text-stone-200 hover:bg-stone-800">${t('close')} ▸ (K)</button></div></div>`:''}
