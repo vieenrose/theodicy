@@ -107,9 +107,12 @@ const AUDIO = (() => {
     boss:   ()=>{ tone(48,1.8,'sawtooth',0.28); [0,3,7].forEach((s,i)=>setTimeout(()=>tone(110*Math.pow(2,s/12),0.6,'square',0.13),i*150)); },
     victory:()=>{ [0,4,7,12,7,12].forEach((s,i)=>setTimeout(()=>tone(523*Math.pow(2,s/12),0.35,'triangle',0.16),i*110)); bell(1046,now()+0.7,0.1); },   // the fanfare a fallen champion deserves
   };
+  let bossOn=false;
+  function setBoss(b){ if(b===bossOn) return; bossOn=b;    // a rival on the field pitches the war-drums up
+    try { if(tracks.combat) tracks.combat.playbackRate = b?1.12:1; } catch(e){} }
   function toggleMute(){ muted=!muted; if(master) master.gain.linearRampToValueAtTime(muted?0:0.9, now()+0.3);
     for(const k in tracks){ if(muted) tracks[k].pause(); else tracks[k].play().catch(()=>{}); } }  // stop decoding, not just silence
-  return { ensure, sfx, setMode, toggleMute, muted:()=>muted, live:()=>!!ctx };
+  return { ensure, sfx, setMode, setBoss, toggleMute, muted:()=>muted, live:()=>!!ctx };
 })();
 const GODF = { vurm:392, kel:311, oss:523, ithra:466 };   // a cast pitch per god
 let omen = null, pending = null, reads = [], busy = false, shrineMenu = false;
@@ -616,6 +619,8 @@ function setLang(l){ LANG=l; try{ localStorage.setItem('theodicy-lang', l); }cat
 function t(s){ return (LANG!=='en' && T[LANG] && T[LANG][s]) || s; }
 const T = {
   fr: {
+    "THE LAST RITE — the edge of death answers":"LE DERNIER RITE — le bord de la mort répond",
+    "LIMIT":"LIMITE",
     'THEODICY':'THÉODICÉE',
     'Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.':'Aldremère repose sous quatre dieux. Ils agissent sur elle, sans qu\'on les invoque ; vous endurez — et répondez.',
     'whom do you revere?':'qui révérez-vous ?',
@@ -902,6 +907,8 @@ const T = {
     "Kel's champion falls — the ridge holds its breath.":"Le champion de Kel tombe — la crête retient son souffle.",
   },
   zh: {
+    "THE LAST RITE — the edge of death answers":"最後儀式——死亡邊緣的回應",
+    "LIMIT":"極限",
     'THEODICY':'神義論',
     'Aldermere lies under four gods. They act on it, unbidden; you endure — and answer.':'亞德莫爾受四位神明統轄。祂們未受召喚便對此地施為；你承受其果——並作出回應。',
     'whom do you revere?':'你敬奉何者？',
@@ -1386,6 +1393,8 @@ const POWERS = {
 const POWER_KEYS = Object.keys(POWERS);
 let powerRank = { mend:1, flood:0, smite:0, fury:0 };   // 0 = locked; 1..3 = current rank
 let furyMult = 1.6;                                     // the multiplier ACTIVE for the current fury window (captured at cast)
+let limitCd = 0;                                        // the Last Rite: a desperation flurry earned by standing at death's edge
+const limitReady = () => heroHp <= heroMax*0.3 && limitCd<=0;
 const KEYMAP = { q:'mend', r:'flood', f:'smite', v:'fury' };
 function upgrade(key){ const pw=POWERS[key]; if(!pw) return; const r=powerRank[key]||0; if(r>=pw.ranks.length) return;
   const cost=pw.ranks[r].pts; if(points<cost) return; points-=cost; powerRank[key]=r+1; }
@@ -1483,12 +1492,16 @@ function heroAttack(){ if(w.over || showStatus || showChron || covenantOpen) ret
   if(best){ const {dmg,crit}=rollDamage(heroDmg*(fury>0?furyMult:1)); best.hp-=dmg; best.hit=0.15; heroFlash=0.16; AUDIO.sfx.hit(); addHit(best.mesh.position, dmg, crit);
     if(crit && relicHas('critSlow')) best.slow=Math.max(best.slow,2.5);
     if(relicHas('manaOnKill') && best.hp<=0) mana=manaMax;
-    const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.3); } }
+    const dir=best.mesh.position.clone().sub(hero.position); dir.y=0; hero.rotation.y=Math.atan2(dir.x,dir.z); hero.position.addScaledVector(dir.normalize(),1.3);
+    if(limitReady()){ limitCd=24; toast=t('THE LAST RITE — the edge of death answers'); toastT=2.5; fx3('#93c5fd'); AUDIO.sfx.level();
+      const tgt=best;
+      for(let i=1;i<=4;i++) setTimeout(()=>{ if(tgt.hp<=0||tgt.dying||w.over) return; const {dmg,crit}=rollDamage(heroDmg*0.8);
+        tgt.hp-=dmg; tgt.hit=0.15; heroFlash=0.16; swingT=0.22; AUDIO.sfx.hit(); addHit(tgt.mesh.position,dmg,crit); }, i*160); } } }
 function updateCombat(dt){
   // spawn pressure scales with bandit strength (and your level)
   spawnT-=dt;
   if(spawnT<=0 && enemies.filter(e=>!e.dying).length < 4+Math.floor(w.bandits.strength)){ spawnEnemy(); spawnT=Math.max(2.2, 7 - w.bandits.strength*0.4 - level*0.15); }
-  mana=Math.min(manaMax,mana+dt*7); if(fury>0)fury-=dt; if(invuln>0)invuln-=dt; if(toastT>0)toastT-=dt;
+  mana=Math.min(manaMax,mana+dt*7); if(fury>0)fury-=dt; if(invuln>0)invuln-=dt; if(toastT>0)toastT-=dt; if(limitCd>0)limitCd-=dt;
   for(const k in castCd) if(castCd[k]>0) castCd[k]-=dt;
   for(let i=hits.length-1;i>=0;i--){ hits[i].t-=dt; hits[i].pos.y+=dt*7; if(hits[i].t<=0) hits.splice(i,1); }
   const clear = enemies.every(e=>e.dying || hero.position.distanceTo(e.mesh.position)>16);
@@ -1700,6 +1713,7 @@ function animate(){
   if(started && !w.over){ saveTimer+=dt; if(saveTimer>6){ saveTimer=0; saveGame(); } }   // autosave every ~6s of play
   if(bannerT>0) bannerT-=dt;                                          // title card fades
   AUDIO.setMode(enemies.some(e=>!e.dying) ? 'combat' : 'explore');   // score follows the danger
+  AUDIO.setBoss(enemies.some(e=>!e.dying && (e.isRival||e.boss)));
   if(fxT>0) fxT-=dt;
   if(heroFlash>0){ heroFlash-=dt; body.material.emissive.setHex(0xff5544); } else body.material.emissive.setHex(0x000000);
   // divine manifestations tick (particles/light/beam per active god-act)
@@ -1848,7 +1862,7 @@ function drawUI(){ const v=w.village,near=nearestThing(),correct=reads.filter(r=
      <div class="flex gap-3.5 items-center flex-wrap">
        <span class="serif text-xl text-stone-100 tracking-widest">THEODICY</span>
        <span class="mono text-xs text-stone-200">Lv ${level}</span>
-       <span class="mono text-[10px] text-rose-300">HP</span><span class="inline-block w-24 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-rose-500" style="width:${hpPct}%"></span></span>
+       <span class="mono text-[10px] text-rose-300">HP</span><span class="inline-block w-24 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-rose-500" style="width:${hpPct}%"></span></span>${limitReady()?`<span class="mono text-[10px] text-sky-300 animate-pulse">◆ ${t('LIMIT')}</span>`:''}
        <span class="mono text-[10px] text-sky-400">MP</span><span class="inline-block w-16 h-2 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-sky-500" style="width:${mnPct}%"></span></span>
        <span class="mono text-[10px] text-amber-300">XP</span><span class="inline-block w-14 h-1.5 rounded bg-stone-800 align-middle"><span class="block h-full rounded bg-amber-500" style="width:${xpPct}%"></span></span>
        <span class="mono text-xs text-stone-500">${t('day')} ${day}</span>
