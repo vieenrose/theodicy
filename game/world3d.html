@@ -1376,8 +1376,8 @@ function manifestGod(god){
     const k=Math.min(1,this.t/this.dur);
     pts.material.opacity=0.95*(1-k*k); light.intensity=3.2*(1-k);
     if(beam){ beam.material.opacity=0.28*(1-k); beam.rotation.y+=dt*0.8; }
-    if(this.t>=this.dur){ scene.remove(pts); scene.remove(light); if(beam) scene.remove(beam); return false; }
-    return true; } });
+    if(this.t>=this.dur){ this.cleanup(); return false; }
+    return true; }, cleanup(){ scene.remove(pts); scene.remove(light); if(beam) scene.remove(beam); } });
 }
 // ---- cinematic moments: a letterboxed, slow-orbit camera when the story earns it (Kaine's
 // entrances, the final trial). The world keeps running — drama, not a pause screen.
@@ -1664,7 +1664,7 @@ function restart(){
   baseMax=100; baseDmg=16; baseManaMax=60; heroCrit={chance:0.06,mult:1.6}; relics=[]; relicOffer=null; busy=false;
   covenant=null; covenantOpen=false; endKind=null; trialOn=false; peaceEnd=false;
   started=false; calling=null; piety={vurm:0,kel:0,oss:0,ithra:0}; crisis=null; chronicle=[]; showChron=false; banner=null; bannerT=0;
-  npcMenu=null; cardGame=null; lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
+  npcMenu=null; cardGame=null; cine=null; for(const m of manifests.splice(0)){ if(m.cleanup) m.cleanup(); } lostFolk=[]; npcPeril=[6,4,2]; party.length=0; rival={stage:0}; rivalMet=0; seenAshfields=false;   // revive the named folk for a new tale
   for(const nn of NPCS){ nn.alive=true; nn.state='idle'; nn.talked=false; nn.kills=0; nn.ally=false; nn.downed=0; nn.mesh.rotation.z=0; nn.mesh.position.set(nn.pos[0],0,nn.pos[2]); if(!nn.mesh.parent) scene.add(nn.mesh);
     nn.trust=0; nn.asked=[]; nn._results={}; nn._topic=null; nn._aside=''; }
   hero.position.set(SITES.village.pos[0],0,SITES.village.pos[2]);
